@@ -29,13 +29,13 @@ Native support for `.env`, `YAML`, and `JSON`. Import your existing configuratio
 
 ## 🚀 Quick Start
 
-### Installation
+### One-Line Install (Linux & macOS)
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-git clone https://github.com/Luvion1/naru.git
-cd naru
-cargo build --release
+curl -sSf https://raw.githubusercontent.com/Luvion1/naru/master/install.sh | bash
 ```
+
+### Manual Build
+Naru is built with Rust. Ensure you have the latest Rust toolchain installed.
 
 ### The 60-Second Workflow
 1. **Initialize**: `naru init`
