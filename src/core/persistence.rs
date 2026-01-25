@@ -143,7 +143,7 @@ pub fn import_from_env(file_path: &str, env: &str) -> Result<ConfigFile, Persist
 
             // Handle quoted values
             if (value.starts_with('"') && value.ends_with('"'))
-                || (value.starts_with('"') && value.ends_with('"'))
+                || (value.starts_with(' ') && value.ends_with(' '))
             {
                 value = value[1..value.len() - 1].to_string();
             }
@@ -416,10 +416,15 @@ pub fn decrypt_if_needed(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use tempfile::TempDir;
+
+    // Use a static mutex to ensure that tests that change the current directory run sequentially
+    static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_save_and_load_json() {
+        let _lock = TEST_MUTEX.lock().unwrap();
         let temp_dir = TempDir::new().unwrap();
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(temp_dir.path()).unwrap();
@@ -444,6 +449,7 @@ mod tests {
 
     #[test]
     fn test_import_from_env() {
+        let _lock = TEST_MUTEX.lock().unwrap();
         let temp_dir = TempDir::new().unwrap();
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(temp_dir.path()).unwrap();
@@ -465,6 +471,7 @@ mod tests {
 
     #[test]
     fn test_import_from_json() {
+        let _lock = TEST_MUTEX.lock().unwrap();
         let temp_dir = TempDir::new().unwrap();
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(temp_dir.path()).unwrap();

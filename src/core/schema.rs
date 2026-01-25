@@ -20,9 +20,8 @@ pub fn add_field(field: FieldDefinition) -> Result<()> {
 
     let key = field.key.clone();
     schema.fields.push(field);
-
     persistence::save_json(SCHEMA_FILE, &schema)?;
-    println!("Added field '{}' to schema", key);
+    println!("Field '{}' added to schema.", key);
     Ok(())
 }
 
@@ -42,7 +41,7 @@ pub fn remove_field(key: &str) -> Result<()> {
     }
 
     persistence::save_json(SCHEMA_FILE, &schema)?;
-    println!("Removed field '{}' from schema", key);
+    println!("Field '{}' removed from schema.", key);
     Ok(())
 }
 
@@ -57,7 +56,7 @@ pub fn update_field(key: &str, updated_field: FieldDefinition) -> Result<()> {
     if let Some(field) = schema.fields.iter_mut().find(|f| f.key == key) {
         *field = updated_field;
         persistence::save_json(SCHEMA_FILE, &schema)?;
-        println!("Updated field '{}' in schema", key);
+        println!("Field '{}' updated in schema.", key);
         Ok(())
     } else {
         Err(anyhow::anyhow!("Field '{}' not found in schema", key))
@@ -67,11 +66,14 @@ pub fn update_field(key: &str, updated_field: FieldDefinition) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use std::sync::Mutex;
     use tempfile::TempDir;
+
+    static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_schema_operations() {
+        let _lock = TEST_MUTEX.lock().unwrap();
         let temp_dir = TempDir::new().unwrap();
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(temp_dir.path()).unwrap();
@@ -114,10 +116,9 @@ mod tests {
 
         // 3. Test Remove
         remove_field("test_key").unwrap();
-
         let schema: SchemaFile = persistence::load_json(SCHEMA_FILE).unwrap();
         assert_eq!(schema.fields.len(), 0);
 
-        std::env::set_current_dir(original_dir).unwrap();
+        std::env::set_current_dir(&original_dir).unwrap();
     }
 }
