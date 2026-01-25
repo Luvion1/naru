@@ -1,0 +1,111 @@
+{
+  "project_name": "My Naru Project",
+  "version": "0.1.0",
+  "environments": {
+    "staging": {
+      "entries": {
+        "api_key": {
+          "value": "different_value",
+          "type": "string",
+          "is_secret": false,
+          "encrypted": false
+        },
+        "db_host": {
+          "value": "staging.db.server",
+          "type": "string",
+          "is_secret": false,
+          "encrypted": false
+        }
+      }
+    },
+    "development": {
+      "entries": {
+        "api_key": {
+          "value": "1234567890",
+          "type": "string",
+          "is_secret": false,
+          "encrypted": false
+        },
+        "API_KEY": {
+          "value": "test123",
+          "type": "string",
+          "is_secret": false,
+          "encrypted": false
+        },
+        "nested": {
+          "value": "a: 1\nb: true",
+          "type": "string",
+          "is_secret": false,
+          "encrypted": false
+        },
+        "db_password": {
+          "value": "116b1a81312d9194ffe3e4fea43f7c0609ce717f5762f93d154e07845e3ec8a25ab71a1afcc9",
+          "type": "string",
+          "is_secret": true,
+          "encrypted": true
+        },
+        "nested_json": {
+          "value": "{\"x\":10,\"y\":false}",
+          "type": "string",
+          "is_secret": false,
+          "encrypted": false
+        },
+        "test_audit_key": {
+          "value": "test_audit_value",
+          "type": "string",
+          "is_secret": false,
+          "encrypted": false
+        },
+        "DB_HOST": {
+          "value": "localhost",
+          "type": "string",
+          "is_secret": false,
+          "encrypted": false
+        },
+        "key_yaml": {
+          "value": "value_yaml",
+          "type": "string",
+          "is_secret": false,
+          "encrypted": false
+        },
+        "DB_PORT": {
+          "value": "5432",
+          "type": "string",
+          "is_secret": false,
+          "encrypted": false
+        },
+        "key_json": {
+          "value": "value_json",
+          "type": "string",
+          "is_secret": false,
+          "encrypted": false
+        },
+        "my_secret_key": {
+          "value": "3df5c46afac5f78a7475a312250435c50d99f5a64f98e2324588c6ff7bd6ab8d0202e8121beb909ca6",
+          "type": "string",
+          "is_secret": true,
+          "encrypted": true
+        }
+      }
+    },
+    "production": {
+      "entries": {}
+    },
+    "test": {
+      "entries": {
+        "QUOTED_VAL": {
+          "value": "hello world",
+          "type": "string",
+          "is_secret": false,
+          "encrypted": false
+        },
+        "SINGLE_QUOTED": {
+          "value": "single quotes",
+          "type": "string",
+          "is_secret": false,
+          "encrypted": false
+        }
+      }
+    }
+  }
+}

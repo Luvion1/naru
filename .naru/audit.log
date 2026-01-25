@@ -1,0 +1,7 @@
+{"timestamp":"2026-01-24T07:27:02.121425796Z","action":"SET","environment":"development","key":"test_audit_key","old_value":null,"new_value":"test_audit_value","user":null}
+{"timestamp":"2026-01-25T06:57:50.528563211Z","action":"IMPORT","environment":"test","key":null,"old_value":null,"new_value":"test_quotes.env","user":"root"}
+{"timestamp":"2026-01-25T06:58:18.684098075Z","action":"ENV_ADD","environment":"production_test","key":null,"old_value":null,"new_value":null,"user":"root"}
+{"timestamp":"2026-01-25T07:03:57.940997140Z","action":"SCHEMA_ADD","environment":"schema","key":"invalid;key","old_value":null,"new_value":null,"user":"root"}
+{"timestamp":"2026-01-25T07:05:31.865783381Z","action":"SCHEMA_ADD","environment":"schema","key":"my_secret_key","old_value":null,"new_value":null,"user":"root"}
+{"timestamp":"2026-01-25T07:06:00.293559130Z","action":"SET","environment":"development","key":"my_secret_key","old_value":null,"new_value":"********","user":"root"}
+{"timestamp":"2026-01-25T07:07:38.268645521Z","action":"ENV_REMOVE","environment":"production_test","key":null,"old_value":null,"new_value":null,"user":"root"}

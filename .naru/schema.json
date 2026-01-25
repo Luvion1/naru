@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "fields": [
+    {
+      "key": "api_key",
+      "type": "string",
+      "description": null,
+      "validation": {
+        "min_length": 10,
+        "max_length": null,
+        "min_value": null,
+        "max_value": null
+      },
+      "is_secret": false
+    },
+    {
+      "key": "invalid;key",
+      "type": "string",
+      "description": null,
+      "validation": null,
+      "is_secret": false
+    },
+    {
+      "key": "my_secret_key",
+      "type": "string",
+      "description": null,
+      "validation": null,
+      "is_secret": true
+    }
+  ]
+}
