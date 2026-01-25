@@ -1,37 +1,62 @@
 # Naru - Secure Configuration Manager
 
-Naru adalah alat baris perintah (CLI) yang dirancang untuk manajemen konfigurasi aplikasi yang aman, terstruktur, dan sadar skema. Naru memastikan integritas data konfigurasi Anda lintas environment (development, staging, production) dengan enkripsi otomatis dan sistem audit yang ketat.
+Naru is a CLI tool designed for secure, structured, and schema-aware application configuration management. It ensures the integrity of your configuration data across environments (development, staging, production) with automatic encryption and a strict auditing system.
 
-## 🚀 Fitur Utama
+## 🚀 Key Features
 
-- **Enkripsi AES-GCM**: Mengamankan data sensitif secara otomatis menggunakan standar industri.
-- **Validasi Skema**: Memastikan nilai konfigurasi sesuai dengan tipe data (string, integer, boolean) dan aturan (min/max).
-- **Multi-Environment**: Manajemen terpisah untuk berbagai lingkungan pengembangan.
-- **Sistem Audit**: Pencatatan setiap perubahan status (Set, Import, Env, Schema) dengan masking nilai rahasia.
-- **Impor/Ekspor Fleksibel**: Mendukung format `.env`, `YAML`, dan `JSON`.
-- **Interaktif Wizard**: Editor skema interaktif untuk memudahkan pemeliharaan aturan data.
+- **AES-GCM Encryption**: Automatically secures sensitive data using industry standards.
+- **Schema Validation**: Ensures configuration values match expected data types (string, integer, boolean) and rules (min/max).
+- **Multi-Environment**: Separate management for different development environments.
+- **Audit System**: Records every change (Set, Import, Env, Schema) with sensitive value masking.
+- **Flexible Import/Export**: Supports `.env`, `YAML`, and `JSON` formats.
+- **Interactive Wizard**: Built-in interactive schema editor for easy data rule maintenance.
 
-## 📁 Dokumentasi Lengkap
+## 🛠️ Installation
 
-Untuk memahami Naru lebih dalam, silakan baca panduan berikut:
-
-1.  [**Panduan Penggunaan CLI**](./docs/panduan-cli.md) - Referensi lengkap perintah `naru`.
-2.  [**Arsitektur Inti**](./docs/arsitektur-inti.md) - Penjelasan struktur internal dan desain sistem.
-3.  [**Model Keamanan**](./docs/model-keamanan.md) - Detail enkripsi dan perlindungan data rahasia.
-4.  [**Sistem Audit**](./docs/sistem-audit.md) - Cara Naru mencatat aktivitas dan menjaga privasi log.
-5.  [**Skema & Validasi**](./docs/skema-validasi.md) - Panduan membuat aturan validasi data.
-
-## 🛠️ Instalasi Cepat
-
-Naru dibangun menggunakan Rust. Pastikan Anda memiliki toolchain Rust terbaru:
+Naru is built with Rust. Ensure you have the latest Rust toolchain installed.
 
 ```bash
-git clone <repository-url>
+# Clone the repository
+git clone https://github.com/Luvion1/naru.git
 cd naru
+
+# Build the project
 cargo build --release
 ```
 
-Binary akan tersedia di `target/release/naru`.
+The binary will be available at `target/release/naru`.
+
+## 📖 Usage Quick Start
+
+### 1. Initialize a Project
+```bash
+naru init
+```
+
+### 2. Create a Schema (Interactive)
+```bash
+naru schema --interactive
+```
+
+### 3. Set a Configuration
+```bash
+naru set KEY VALUE --env production --secret
+```
+
+### 4. Export Configurations
+```bash
+naru export --format yaml --output config.yaml
+```
+
+## 📁 Detailed Documentation
+
+For more in-depth information, please refer to the documents in the `docs/` directory:
+
+1. [**CLI Reference**](./docs/cli-guide.md) - Complete command reference.
+2. [**Core Architecture**](./docs/architecture.md) - Internal design and structure.
+3. [**Security Model**](./docs/security-model.md) - Encryption and data protection details.
+4. [**Audit System**](./docs/audit-system.md) - How Naru tracks activities.
+5. [**Validation Schema**](./docs/validation-schema.md) - Creating data validation rules.
 
 ---
-© 2026 Naru Project. Dibuat untuk keamanan dan kenyamanan DevOps.
+© 2026 Naru Project. Built for DevOps security and efficiency.
