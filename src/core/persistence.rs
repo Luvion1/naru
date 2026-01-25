@@ -1,8 +1,8 @@
-use super::constants *;
+use super::constants::*;
 use super::crypto;
 use super::locking;
 use super::security;
-use crate::core::models *;
+use crate::core::models::*;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -36,7 +36,7 @@ pub enum PersistenceError {
 
 pub fn init_project() -> Result<(), PersistenceError> {
     if Path::new(NARU_DIR).exists() {
-        return Ok(())
+        return Ok(());
     }
 
     fs::create_dir_all(NARU_DIR)?;
@@ -143,7 +143,7 @@ pub fn import_from_env(file_path: &str, env: &str) -> Result<ConfigFile, Persist
 
             // Handle quoted values
             if (value.starts_with('"') && value.ends_with('"'))
-                || (value.starts_with(' ') && value.ends_with(' ')) 
+                || (value.starts_with(' ') && value.ends_with(' '))
             {
                 value = value[1..value.len() - 1].to_string();
             }
@@ -226,12 +226,11 @@ pub fn import_from_json(file_path: &str, env: &str) -> Result<ConfigFile, Persis
 fn encrypt_entry_value(entry: &mut ConfigValueEntry) -> Result<(), PersistenceError> {
     if entry.is_secret && !entry.encrypted {
         let encryption_key = get_encryption_key()?;
-        let encrypted_value =
-            crypto::encrypt_data(&entry.value, &encryption_key).map_err(|e| {
-                PersistenceError::IoError {
-                    source: std::io::Error::other(e.to_string()),
-                }
-            })?;
+        let encrypted_value = crypto::encrypt_data(&entry.value, &encryption_key).map_err(|e| {
+            PersistenceError::IoError {
+                source: std::io::Error::other(e.to_string()),
+            }
+        })?;
 
         entry.value = encrypted_value;
         entry.encrypted = true;
@@ -482,7 +481,7 @@ mod tests {
 
         init_project().unwrap();
 
-        let json_content = r kebijakan{"API_KEY": "12345", "DEBUG": true}"#;
+        let json_content = r###"{"API_KEY": "12345", "DEBUG": true}"###;
         fs::write("test.json", json_content).unwrap();
 
         let config = import_from_json("test.json", "staging").unwrap();
