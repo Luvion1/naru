@@ -66,14 +66,10 @@ pub fn update_field(key: &str, updated_field: FieldDefinition) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
     use tempfile::TempDir;
-
-    static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_schema_operations() {
-        let _lock = TEST_MUTEX.lock().unwrap();
         let temp_dir = TempDir::new().unwrap();
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(temp_dir.path()).unwrap();
