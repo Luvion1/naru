@@ -226,11 +226,12 @@ pub fn import_from_json(file_path: &str, env: &str) -> Result<ConfigFile, Persis
 fn encrypt_entry_value(entry: &mut ConfigValueEntry) -> Result<(), PersistenceError> {
     if entry.is_secret && !entry.encrypted {
         let encryption_key = get_encryption_key()?;
-        let encrypted_value = crypto::encrypt_data(&entry.value, &encryption_key).map_err(|e| {
-            PersistenceError::IoError {
-                source: std::io::Error::other(e.to_string()),
-            }
-        })?;
+        let encrypted_value =
+            crypto::encrypt_data(&entry.value, &encryption_key).map_err(|e| {
+                PersistenceError::IoError {
+                    source: std::io::Error::other(e.to_string()),
+                }
+            })?;
 
         entry.value = encrypted_value;
         entry.encrypted = true;
@@ -418,13 +419,30 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    /// Guard to revert current directory on drop
+    struct TestDirGuard {
+        original_dir: std::path::PathBuf,
+    }
+
+    impl TestDirGuard {
+        fn new(temp_path: &Path) -> Self {
+            let original_dir = std::env::current_dir().unwrap();
+            std::env::set_current_dir(temp_path).unwrap();
+            Self { original_dir }
+        }
+    }
+
+    impl Drop for TestDirGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.original_dir);
+        }
+    }
+
     #[test]
     fn test_save_and_load_json() {
         let temp_dir = TempDir::new().unwrap();
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp_dir.path()).unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
 
-        // Create the directory manually for direct save_json test
         fs::create_dir_all(NARU_DIR).unwrap();
 
         let test_config = ConfigFile {
@@ -438,17 +456,13 @@ mod tests {
 
         assert_eq!(test_config.project_name, loaded_config.project_name);
         assert_eq!(test_config.version, loaded_config.version);
-
-        std::env::set_current_dir(&original_dir).unwrap();
     }
 
     #[test]
     fn test_import_from_env() {
         let temp_dir = TempDir::new().unwrap();
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp_dir.path()).unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
 
-        // init_project will create .naru
         init_project().unwrap();
 
         let env_content = "APP_PORT=8080\nDB_PASS=\"quoted_secret\"\nEMPTY=";
@@ -459,26 +473,21 @@ mod tests {
         assert_eq!(dev_entries.get("APP_PORT").unwrap().value, "8080");
         assert_eq!(dev_entries.get("DB_PASS").unwrap().value, "quoted_secret");
         assert_eq!(dev_entries.get("EMPTY").unwrap().value, "");
-
-        std::env::set_current_dir(&original_dir).unwrap();
     }
 
     #[test]
     fn test_import_from_json() {
         let temp_dir = TempDir::new().unwrap();
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp_dir.path()).unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
 
         init_project().unwrap();
 
-        let json_content = r#"{"API_KEY": "12345", "DEBUG": true}"#;
+        let json_content = r kebijakan{"API_KEY": "12345", "DEBUG": true}"#;
         fs::write("test.json", json_content).unwrap();
 
         let config = import_from_json("test.json", "staging").unwrap();
         let staging_entries = &config.environments.get("staging").unwrap().entries;
         assert_eq!(staging_entries.get("API_KEY").unwrap().value, "12345");
         assert_eq!(staging_entries.get("DEBUG").unwrap().value, "true");
-
-        std::env::set_current_dir(&original_dir).unwrap();
     }
 }

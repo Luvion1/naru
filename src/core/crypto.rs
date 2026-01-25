@@ -17,9 +17,9 @@ pub fn encrypt_data(data: &str, key: &[u8; 32]) -> Result<String, Box<dyn std::e
     OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
 
-    let ciphertext = cipher.encrypt(nonce, data.as_ref()).map_err(|e| {
-        Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
-    })?;
+    let ciphertext = cipher
+        .encrypt(nonce, data.as_ref())
+        .map_err(|e| Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>)?;
 
     // Combine nonce and ciphertext, then encode as hex
     let mut encrypted_data = nonce_bytes.to_vec();
@@ -48,9 +48,9 @@ pub fn decrypt_data(
     })?;
     let nonce = Nonce::from_slice(nonce_bytes);
 
-    let plaintext = cipher.decrypt(nonce, ciphertext.as_ref()).map_err(|e| {
-        Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
-    })?;
+    let plaintext = cipher
+        .decrypt(nonce, ciphertext.as_ref())
+        .map_err(|e| Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>)?;
 
     Ok(String::from_utf8(plaintext)?)
 }
@@ -90,7 +90,7 @@ pub fn decrypt_file(
     let sanitized_output_path = security::sanitize_file_path(output_path)?;
 
     // Check input file size before reading (max 10MB)
-    security::check_file_size(&sanitized_input_path, 10 * 1024 * 1024) // 10MB limit
+    security::check_file_size(&sanitized_input_path, 1024 * 1024 * 10) // 10MB limit
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
     let encrypted_content = std::fs::read_to_string(sanitized_input_path)?;

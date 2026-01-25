@@ -66,13 +66,32 @@ pub fn update_field(key: &str, updated_field: FieldDefinition) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use tempfile::TempDir;
+
+    /// Guard to revert current directory on drop
+    struct TestDirGuard {
+        original_dir: std::path::PathBuf,
+    }
+
+    impl TestDirGuard {
+        fn new(temp_path: &Path) -> Self {
+            let original_dir = std::env::current_dir().unwrap();
+            std::env::set_current_dir(temp_path).unwrap();
+            Self { original_dir }
+        }
+    }
+
+    impl Drop for TestDirGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.original_dir);
+        }
+    }
 
     #[test]
     fn test_schema_operations() {
         let temp_dir = TempDir::new().unwrap();
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp_dir.path()).unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
 
         persistence::init_project().unwrap();
 
@@ -114,7 +133,5 @@ mod tests {
         remove_field("test_key").unwrap();
         let schema: SchemaFile = persistence::load_json(SCHEMA_FILE).unwrap();
         assert_eq!(schema.fields.len(), 0);
-
-        std::env::set_current_dir(&original_dir).unwrap();
     }
 }
