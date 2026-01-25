@@ -3,13 +3,17 @@ use std::path::{Path, PathBuf};
 /// Sanitize file path to prevent directory traversal attacks
 pub fn sanitize_file_path(path: &str) -> Result<PathBuf, &'static str> {
     // Check for directory traversal patterns
-    if path.contains("../") || path.contains("..\\") || path.starts_with("../") || path.starts_with("..\\") {
+    if path.contains("../")
+        || path.contains("..\\")
+        || path.starts_with("../")
+        || path.starts_with("..\\")
+    {
         return Err("Path contains directory traversal sequences");
     }
 
     // Normalize the path by removing redundant components
     let path = Path::new(path);
-    
+
     // Check if the path is absolute (which we don't allow)
     if path.is_absolute() {
         return Err("Absolute paths are not allowed");
@@ -17,7 +21,7 @@ pub fn sanitize_file_path(path: &str) -> Result<PathBuf, &'static str> {
 
     // Resolve the path to ensure it's within allowed boundaries
     let normalized = normalize_path(path);
-    
+
     // Ensure the final path is still relative
     if normalized.is_absolute() {
         return Err("Path normalization resulted in absolute path");
@@ -58,8 +62,13 @@ pub fn validate_environment_name(name: &str) -> Result<(), &'static str> {
     }
 
     // Check for invalid characters
-    if !name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
-        return Err("Environment name contains invalid characters. Only alphanumeric, underscore, and hyphen are allowed.");
+    if !name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err(
+            "Environment name contains invalid characters. Only alphanumeric, underscore, and hyphen are allowed.",
+        );
     }
 
     // Check length limits
@@ -78,8 +87,13 @@ pub fn validate_config_key(key: &str) -> Result<(), &'static str> {
     }
 
     // Check for invalid characters
-    if !key.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.') {
-        return Err("Configuration key contains invalid characters. Only alphanumeric, underscore, hyphen, and dot are allowed.");
+    if !key
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.')
+    {
+        return Err(
+            "Configuration key contains invalid characters. Only alphanumeric, underscore, hyphen, and dot are allowed.",
+        );
     }
 
     // Check length limits
@@ -100,8 +114,7 @@ pub fn sanitize_string_value(value: &str) -> String {
 
 /// Check if file size is within acceptable limits
 pub fn check_file_size(path: &Path, max_size: u64) -> Result<(), &'static str> {
-    let metadata = std::fs::metadata(path)
-        .map_err(|_| "Could not get file metadata")?;
+    let metadata = std::fs::metadata(path).map_err(|_| "Could not get file metadata")?;
 
     if metadata.len() > max_size {
         return Err("File exceeds maximum allowed size");

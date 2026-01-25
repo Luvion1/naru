@@ -30,7 +30,9 @@ impl AuditLogEntry {
             key,
             old_value,
             new_value,
-            user: std::env::var("USER").or_else(|_| std::env::var("USERNAME")).ok(), // Get username from environment
+            user: std::env::var("USER")
+                .or_else(|_| std::env::var("USERNAME"))
+                .ok(), // Get username from environment
         }
     }
 
@@ -45,7 +47,10 @@ impl AuditLogEntry {
         Ok(())
     }
 
-    pub fn get_recent_logs(log_path: &str, count: usize) -> Result<Vec<AuditLogEntry>, Box<dyn std::error::Error>> {
+    pub fn get_recent_logs(
+        log_path: &str,
+        count: usize,
+    ) -> Result<Vec<AuditLogEntry>, Box<dyn std::error::Error>> {
         if !Path::new(log_path).exists() {
             return Ok(Vec::new());
         }
@@ -55,16 +60,18 @@ impl AuditLogEntry {
         let mut entries: Vec<AuditLogEntry> = Vec::with_capacity(count);
 
         use std::io::BufRead;
-        for line in reader.lines() {
-            if let Ok(line_str) = line {
-                if let Ok(entry) = serde_json::from_str::<AuditLogEntry>(&line_str) {
-                    entries.push(entry);
-                }
+        for line_str in reader.lines().map_while(Result::ok) {
+            if let Ok(entry) = serde_json::from_str::<AuditLogEntry>(&line_str) {
+                entries.push(entry);
             }
         }
 
         // Return the most recent entries
-        let start = if entries.len() > count { entries.len() - count } else { 0 };
+        let start = if entries.len() > count {
+            entries.len() - count
+        } else {
+            0
+        };
         Ok(entries.into_iter().skip(start).collect())
     }
 }
@@ -86,108 +93,43 @@ pub fn log_action(
         new_value.map(|s| s.to_string()),
     );
 
-        entry.log_to_file(log_path)?;
+    entry.log_to_file(log_path)?;
 
-        Ok(())
+    Ok(())
+}
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_log_action() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        log_action(
+            "SET",
+            "dev",
+            Some("key1"),
+            Some("old"),
+            Some("new"),
+            log_path_str,
+        )
+        .unwrap();
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].action, "SET");
+        assert_eq!(logs[0].key, Some("key1".to_string()));
     }
 
-    
-
-    #[cfg(test)]
-
-    mod tests {
-
-        use super::*;
-
-        use tempfile::TempDir;
-
-    
-
-        #[test]
-
-        fn test_log_action() {
-
-            let temp_dir = TempDir::new().unwrap();
-
-            let log_path = temp_dir.path().join("audit.log");
-
-            let log_path_str = log_path.to_str().unwrap();
-
-    
-
-            log_action("SET", "dev", Some("key1"), Some("old"), Some("new"), log_path_str).unwrap();
-
-    
-
-            let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
-
-            assert_eq!(logs.len(), 1);
-
-            assert_eq!(logs[0].action, "SET");
-
-                        assert_eq!(logs[0].key, Some("key1".to_string()));
-
-                    }
-
-            
-
-                            #[test]
-
-            
-
-                            fn test_audit_user_identification() {
-
-            
-
-                                unsafe { std::env::set_var("USER", "test_user") };
-
-            
-
-                                let entry = AuditLogEntry::new(
-
-            
-
-                                    "TEST".to_string(),
-
-            
-
-                                    "dev".to_string(),
-
-            
-
-                                    None,
-
-            
-
-                                    None,
-
-            
-
-                                    None,
-
-            
-
-                                );
-
-            
-
-                                assert_eq!(entry.user, Some("test_user".to_string()));
-
-            
-
-                                unsafe { std::env::remove_var("USER") };
-
-            
-
-                            }
-
-            
-
-                    
-
-                }
-
-            
-
-    
+    #[test]
+    fn test_audit_user_identification() {
+        unsafe { std::env::set_var("USER", "test_user") };
+        let entry = AuditLogEntry::new("TEST".to_string(), "dev".to_string(), None, None, None);
+        assert_eq!(entry.user, Some("test_user".to_string()));
+        unsafe { std::env::remove_var("USER") };
+    }
+}

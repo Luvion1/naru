@@ -1,15 +1,21 @@
-use crate::core::models::{SchemaFile, FieldDefinition};
-use crate::core::persistence;
 use crate::core::constants::SCHEMA_FILE;
+use crate::core::models::{FieldDefinition, SchemaFile};
+use crate::core::persistence;
 use anyhow::Result;
 
 /// Menambahkan field ke skema
 pub fn add_field(field: FieldDefinition) -> Result<()> {
-    let mut schema: SchemaFile = persistence::load_json(SCHEMA_FILE)
-        .unwrap_or_else(|_| SchemaFile { version: "1.0".to_string(), fields: vec![] });
+    let mut schema: SchemaFile =
+        persistence::load_json(SCHEMA_FILE).unwrap_or_else(|_| SchemaFile {
+            version: "1.0".to_string(),
+            fields: vec![],
+        });
 
     if schema.fields.iter().any(|f| f.key == field.key) {
-        return Err(anyhow::anyhow!("Field '{}' already exists in schema", field.key));
+        return Err(anyhow::anyhow!(
+            "Field '{}' already exists in schema",
+            field.key
+        ));
     }
 
     let key = field.key.clone();
@@ -22,8 +28,11 @@ pub fn add_field(field: FieldDefinition) -> Result<()> {
 
 /// Menghapus field dari skema
 pub fn remove_field(key: &str) -> Result<()> {
-    let mut schema: SchemaFile = persistence::load_json(SCHEMA_FILE)
-        .unwrap_or_else(|_| SchemaFile { version: "1.0".to_string(), fields: vec![] });
+    let mut schema: SchemaFile =
+        persistence::load_json(SCHEMA_FILE).unwrap_or_else(|_| SchemaFile {
+            version: "1.0".to_string(),
+            fields: vec![],
+        });
 
     let initial_len = schema.fields.len();
     schema.fields.retain(|f| f.key != key);
@@ -39,8 +48,11 @@ pub fn remove_field(key: &str) -> Result<()> {
 
 /// Memperbarui field di skema
 pub fn update_field(key: &str, updated_field: FieldDefinition) -> Result<()> {
-    let mut schema: SchemaFile = persistence::load_json(SCHEMA_FILE)
-        .unwrap_or_else(|_| SchemaFile { version: "1.0".to_string(), fields: vec![] });
+    let mut schema: SchemaFile =
+        persistence::load_json(SCHEMA_FILE).unwrap_or_else(|_| SchemaFile {
+            version: "1.0".to_string(),
+            fields: vec![],
+        });
 
     if let Some(field) = schema.fields.iter_mut().find(|f| f.key == key) {
         *field = updated_field;
@@ -55,8 +67,7 @@ pub fn update_field(key: &str, updated_field: FieldDefinition) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::constants::NARU_DIR;
-    use std::fs;
+
     use tempfile::TempDir;
 
     #[test]
@@ -64,7 +75,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(temp_dir.path()).unwrap();
-        
+
         persistence::init_project().unwrap();
 
         // 1. Test Add
@@ -74,24 +85,32 @@ mod tests {
             description: Some("desc".to_string()),
             validation: None,
             is_secret: false,
-        }).unwrap();
+        })
+        .unwrap();
 
         let schema: SchemaFile = persistence::load_json(SCHEMA_FILE).unwrap();
         assert_eq!(schema.fields.len(), 1);
         assert_eq!(schema.fields[0].key, "test_key");
 
         // 2. Test Update
-        update_field("test_key", FieldDefinition {
-            key: "test_key".to_string(),
-            r#type: "integer".to_string(),
-            description: Some("updated desc".to_string()),
-            validation: None,
-            is_secret: false,
-        }).unwrap();
+        update_field(
+            "test_key",
+            FieldDefinition {
+                key: "test_key".to_string(),
+                r#type: "integer".to_string(),
+                description: Some("updated desc".to_string()),
+                validation: None,
+                is_secret: false,
+            },
+        )
+        .unwrap();
 
         let schema: SchemaFile = persistence::load_json(SCHEMA_FILE).unwrap();
         assert_eq!(schema.fields[0].r#type, "integer");
-        assert_eq!(schema.fields[0].description, Some("updated desc".to_string()));
+        assert_eq!(
+            schema.fields[0].description,
+            Some("updated desc".to_string())
+        );
 
         // 3. Test Remove
         remove_field("test_key").unwrap();

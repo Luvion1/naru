@@ -65,20 +65,27 @@ impl ConfigFormat for PropertiesFormat {
 
             if let Some(pos) = line.find('=') {
                 let key_part = line[..pos].trim();
-                let value = line[pos+1..].trim().to_string();
+                let value = line[pos + 1..].trim().to_string();
 
                 // Extract environment and key using the first dot as separator
                 // For properties format, we expect: <env>.<key>=<value>
                 if let Some((env_name, key)) = key_part.split_once('.') {
-                    let env_config = environments.entry(env_name.to_string())
-                        .or_insert(EnvironmentConfig { entries: HashMap::new() });
+                    let env_config =
+                        environments
+                            .entry(env_name.to_string())
+                            .or_insert(EnvironmentConfig {
+                                entries: HashMap::new(),
+                            });
 
-                    env_config.entries.insert(key.to_string(), crate::core::models::ConfigValueEntry {
-                        value,
-                        r#type: "string".to_string(),
-                        is_secret: false,
-                        encrypted: false,
-                    });
+                    env_config.entries.insert(
+                        key.to_string(),
+                        crate::core::models::ConfigValueEntry {
+                            value,
+                            r#type: "string".to_string(),
+                            is_secret: false,
+                            encrypted: false,
+                        },
+                    );
                 }
             }
         }
@@ -100,13 +107,4 @@ pub fn save_config_as_format<P: AsRef<Path>>(
     let serialized = format.serialize(config)?;
     fs::write(path, serialized)?;
     Ok(())
-}
-
-/// Fungsi utilitas untuk memuat konfigurasi dari format tertentu
-pub fn load_config_from_format<P: AsRef<Path>>(
-    path: P,
-    format: &dyn ConfigFormat,
-) -> Result<ConfigFile> {
-    let data = fs::read_to_string(path)?;
-    format.deserialize(&data)
 }
