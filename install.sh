@@ -15,6 +15,13 @@ GREEN='\033[0-32m'
 BLUE='\033[0-34m'
 NC='\033[0m' # No Color
 
+cat << "EOF"
+      |\      _,,,---,,_
+ZZZzz /,`.-'`'    -.  ;-;;,_
+     |,4-  ) )-,_. ,\ (  `'-'
+    '---''(_/--'  `-'\_)
+EOF
+
 printf "${BLUE}==>${NC} Installing Naru Secure Configuration Manager...\n"
 
 # Check if cargo is available as fallback

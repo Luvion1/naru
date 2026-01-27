@@ -17,15 +17,6 @@ fn main() -> Result<()> {
         Commands::Version => {
             println!("Naru version {}", env!("CARGO_PKG_VERSION"));
         }
-        Commands::Meow => {
-            println!(r#"
-            
-    |\__/,|   (`\
-  _.|o o  |_   ) )
--(((---(((--------
-  Naru says: Meow! 🐱
-            "#);
-        }
         Commands::Init => {
             if Path::new(NARU_DIR).exists() {
                 println!("Project already initialized.");
