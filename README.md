@@ -1,80 +1,72 @@
 # 🛡️ Naru
 
-[![CI](https://github.com/Luvion1/naru/actions/workflows/ci.yml/badge.svg)](https://github.com/Luvion1/naru/actions/workflows/ci.yml)
-[![Release](https://github.com/Luvion1/naru/actions/workflows/release.yml/badge.svg)](https://github.com/Luvion1/naru/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://www.rust-lang.org/)
+### *Securing the Backbone of Modern Applications*
 
-**Naru** is a high-performance, security-first CLI tool for structured configuration management. Built with Rust for speed and safety, it provides an industrial-grade layer for handling sensitive environment variables and application settings with built-in schema enforcement and cryptographic protection.
+[![Rust 2024](https://img.shields.io/badge/Rust-2024-orange?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
+[![AES-256-GCM](https://img.shields.io/badge/Security-AES--256--GCM-green?style=for-the-badge)](docs/security-model.md)
+[![Audit Chained](https://img.shields.io/badge/Audit-Hash--Chained-blue?style=for-the-badge)](docs/audit-system.md)
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 
-[Explore Documentation](./docs/architecture.md) • [Report Bug](https://github.com/Luvion1/naru/issues) • [Request Feature](https://github.com/Luvion1/naru/issues)
+**Naru** is an industrial-grade, security-first configuration engine. Built with the speed and safety of Rust, it provides a tamper-evident, schema-enforced ecosystem for managing application secrets and environment variables in high-stakes production environments.
 
----
-
-## ✨ Core Pillars
-
-### 🔒 Zero-Trust Security
-All sensitive values are encrypted using **AES-256-GCM**. Naru ensures that secrets are never stored in plain text, even in your local configuration files.
-
-### 📐 Schema-Driven Integrity
-Forget about runtime crashes due to missing environment variables. Naru enforces strict schema validation (types, ranges, regex) before your configuration is ever deployed.
-
-### 🕵️ Immutable Auditing
-Every operation—from manual sets to bulk imports—is cryptographically hashed and logged. Know exactly **who** changed **what** and **when**, with sensitive data automatically masked in logs.
-
-### 🔄 Seamless Interop
-Native support for `.env`, `YAML`, and `JSON`. Import your existing configurations and Naru will automatically upgrade them with security and validation.
+[**Explore Documentation**](docs/cli-guide.md) • [**Report an Issue**](https://github.com/Luvion1/naru/issues) • [**Request a Feature**](https://github.com/Luvion1/naru/issues)
 
 ---
 
-## 🚀 Quick Start
+## 🔥 Why Naru?
 
-### One-Line Install (Linux & macOS)
+| Feature | Description |
+| :--- | :--- |
+| **Zero-Trust Encryption** | All sensitive data is protected by **AES-256-GCM** with **SHA-256** key derivation. |
+| **Immutable Audit Trail** | Every mutation is cryptographically signed and chained, creating a tamper-evident history. |
+| **Industrial Validation** | Enforce strict types, numeric ranges, and **Regex patterns** before data ever leaves the CLI. |
+| **Atomic & Thread-Safe** | OS-level advisory locking ensures zero data corruption during concurrent operations. |
+| **Modern Interop** | Native handling of `.env`, `YAML`, `JSON`, and `TOML` with intelligent merging logic. |
+
+---
+
+## 🚀 Getting Started in 3 Steps
+
+### 1. Installation
+Build the binary optimized for your architecture:
 ```bash
-curl -sSf https://raw.githubusercontent.com/Luvion1/naru/master/install.sh | bash
+cargo build --release --locked
+sudo cp target/release/naru /usr/local/bin/
 ```
 
-### Manual Build
-Naru is built with Rust. Ensure you have the latest Rust toolchain installed.
+### 2. Initialize your Vault
+```bash
+export NARU_ENCRYPTION_KEY="your-strong-master-password"
+naru init
+```
 
-### The 60-Second Workflow
-1. **Initialize**: `naru init`
-2. **Secure Schema**: `naru schema --interactive`
-3. **Set Secrets**: `naru set DB_PASSWORD "p@ssword" --secret`
-4. **Validation Check**: `naru validate`
-5. **Export**: `naru export --format yaml`
+### 3. Secure a Configuration
+```bash
+# Define the validation rule
+naru schema add --key STRIPE_KEY --type string --secret --pattern "^sk_live_.*$"
 
----
-
-## 🛠️ Technology Stack
-
-- **Core**: Rust (2024 Edition)
-- **Encryption**: `aes-gcm` (Authenticated Encryption)
-- **CLI**: `clap` v4 (Derive API)
-- **Serialization**: `serde` (High-performance JSON/YAML/TOML)
-- **Terminal UI**: `dialoguer` & `console`
+# Set the value (automatically encrypted and validated)
+naru set STRIPE_KEY=sk_live_51Pq... --env production
+```
 
 ---
 
-## 📖 Deep Dive Documentation
+## 🏛️ Architecture at a Glance
 
-| Document | Description |
-| :--- | :--- |
-| [**CLI Guide**](./docs/cli-guide.md) | Comprehensive reference for all commands and flags. |
-| [**Architecture**](./docs/architecture.md) | Detailed breakdown of the internal DDD-inspired design. |
-| [**Security Model**](./docs/security-model.md) | Technical specs on the encryption and threat model. |
-| [**Validation**](./docs/validation-schema.md) | How to write complex validation rules for your data. |
-| [**Audit System**](./docs/audit-system.md) | Understanding the tamper-evident logging system. |
+Naru follows a **Clean Architecture** pattern, isolating its cryptographic core from external I/O.
+
+- **`src/core`**: The Stateless Engine. Pure business logic, validation, and crypto.
+- **`src/cli`**: The Interface. High-performance command parsing and TUI.
+- **`src/persistence`**: The Safe. Atomic file operations and OS-level locking.
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) to get started.
-
-## 📄 License
-
-Distributed under the MIT License. See `LICENSE` for more information.
+We believe in open security. Check our [Contributing Guide](CONTRIBUTING.md) to see how you can help strengthen the Naru ecosystem.
 
 ---
-<p align="center">Built with ❤️ for the DevOps community by <b>Luvion1</b></p>
+<p align="center">
+  <b>Developed with precision for the security-conscious engineer.</b><br>
+  Released under the MIT License.
+</p>

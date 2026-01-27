@@ -1,33 +1,51 @@
-# Sistem Audit Naru
+# 🕵️ Audit System & Hash Chaining
 
-Sistem audit Naru memberikan jejak aktivitas transparan untuk setiap perubahan yang terjadi pada sistem manajemen konfigurasi Anda.
+Naru features an industrial-grade auditing system that provides a transparent and immutable history of all configuration changes.
 
-## 📝 Lokasi & Format Log
-Log disimpan di `.naru/audit.log`. Setiap entri adalah objek JSON satu baris, sehingga memudahkan pengolahan dengan alat bantu seperti `jq` atau sistem agregasi log eksternal.
+## 🔗 How Hash Chaining Works
 
-### Contoh Entri
+Naru's audit log behaves like a cryptographic ledger. Each entry is linked to the one before it using a SHA-256 hash.
+
+### 🧬 Anatomy of a Log Entry
 ```json
-{"timestamp":"2026-01-25T07:06:00Z","action":"SET","environment":"development","key":"db_port","old_value":"5432","new_value":"5433","user":"dev_user"}
+{
+  "timestamp": "2026-01-27T10:00:00Z",
+  "action": "SET",
+  "environment": "production",
+  "key": "API_KEY",
+  "old_value": "********",
+  "new_value": "********",
+  "user": "admin",
+  "previous_hash": "a1b2c3d4...",
+  "hash": "e5f6g7h8..."
+}
 ```
 
-## 🔍 Aksi yang Dicatat
-Naru mencatat hampir seluruh operasi modifikasi:
--   `SET`: Penambahan atau perubahan nilai tunggal.
--   `IMPORT`: Impor massal data dari file.
--   `ENV_ADD` / `ENV_REMOVE`: Manipulasi environment.
--   `SCHEMA_ADD` / `SCHEMA_EDIT` / `SCHEMA_REMOVE`: Perubahan pada skema.
--   `BACKUP_RESTORE`: Pemulihan data dari cadangan.
+1. **Genesis**: The first entry uses a hardcoded "Genesis Hash" (`0000...0000`) as its `previous_hash`.
+2. **Linking**: Every subsequent entry reads the `hash` of the last line in `audit.log` and stores it in its `previous_hash` field.
+3. **Hashing**: The current entry's `hash` is then calculated by hashing all its contents *including* the `previous_hash`.
 
-## 👤 Identifikasi Pengguna
-Naru mencoba mengidentifikasi siapa yang melakukan aksi dengan mengambil variabel environment `USER` atau `USERNAME`. Jika tidak tersedia, identitas akan dicatat sebagai `root` (dalam lingkungan terbatas) atau `null`.
+## 🛡️ Tamper Detection
 
-## 🛡️ Kebijakan Masking
-Privasi adalah prioritas. Jika sebuah field ditandai sebagai rahasia, Naru akan melakukan masking pada kolom `old_value` dan `new_value`. 
+If an attacker modifies a previous log entry (e.g., to hide an unauthorized change):
+1. The `hash` of the modified entry will no longer match its content.
+2. The `previous_hash` of the next entry will no longer match the recalculated hash of the modified entry.
+3. The entire chain from the point of tampering becomes invalid.
 
-| Skenario | Pencatatan Nilai |
-| :--- | :--- |
-| Field Biasa | Nilai mentah (plaintext) |
-| Field Rahasia | `********` |
-| Password/Key | `********` |
+### Verifying Integrity
+You can verify the audit trail at any time using:
+```bash
+naru audit verify
+```
+Naru will iterate through the entire log, recalculate hashes, and ensure the chain is unbroken.
 
-Mekanisme ini memastikan bahwa meskipun file `audit.log` jatuh ke tangan yang salah, penyerang tidak akan mendapatkan kunci akses atau kredensial database Anda.
+## 🔒 Automatic Secret Masking
+
+Naru protects your secrets even in the logs. If a configuration key contains sensitive keywords (like `pass`, `secret`, `key`, `token`, `auth`), Naru automatically:
+- Detects the sensitivity.
+- Replaces the `old_value` and `new_value` in the audit log with `********`.
+- **Note**: The hash is still calculated using the *masked* value, ensuring that log verification doesn't require access to the actual plaintext secrets.
+
+## 👤 User Identification
+
+Naru automatically identifies the person making changes by reading the `$USER` (Linux/macOS) or `$USERNAME` (Windows) environment variables, ensuring accountability in team environments.

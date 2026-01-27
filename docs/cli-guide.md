@@ -1,61 +1,72 @@
-# Panduan Penggunaan CLI Naru
+# 💻 CLI Guide
 
-Dokumen ini berisi referensi lengkap untuk perintah-perintah yang tersedia di Naru CLI.
+This guide provides a comprehensive reference for all Naru commands and their options.
 
-## 🛠️ Inisialisasi
+## 🏁 Project Initialization
 
 ### `naru init`
-Membuat direktori `.naru/` dan file dasar (`config.json`, `schema.json`) di direktori saat ini.
+Initializes a new Naru project in the current directory.
+- Creates `.naru/` directory.
+- Generates default `config.json` and `schema.json`.
 
-## 📝 Manajemen Konfigurasi
+## ⚙️ Configuration Management
 
-### `naru set <KEY>=<VALUE> [--env <ENV>] [--secret]`
-Menyimpan nilai konfigurasi.
-- `--env`: Menentukan environment (default: `development`).
-- `--secret`: Menandai nilai sebagai rahasia (akan dienkripsi).
+### `naru set <KEY=VALUE>`
+Sets a configuration value in the default environment.
+- `--env, -e`: Target environment (default: `development`).
+- `--secret, -s`: Encrypt the value.
 
-### `naru get <KEY> [--env <ENV>]`
-Mengambil dan menampilkan nilai konfigurasi. Nilai terenkripsi akan didekripsi secara otomatis jika kunci tersedia.
+### `naru get <KEY>`
+Retrieves a configuration value.
+- `--env, -e`: Environment to read from.
 
-### `naru list [--env <ENV>]`
-Menampilkan semua konfigurasi dalam satu environment beserta tipe datanya.
+### `naru list`
+Lists all configuration keys and values in an environment.
+- `--env, -e`: Target environment.
 
-## 📥 Impor & Ekspor
+### `naru diff <ENV1> <ENV2>`
+Compares configuration values between two environments and shows the differences.
 
-### `naru import <FILE_PATH> [--env <ENV>]`
-Mengimpor data dari file eksternal. Mendukung `.env`, `.yaml`, `.yml`, dan `.json`.
-*Catatan: Naru akan secara otomatis memvalidasi data terhadap skema saat impor.*
+## 📐 Schema Management
 
-### `naru export <FILE_PATH> --format <FORMAT> [--env <ENV>]`
-Mengekspor data ke file eksternal. Format yang didukung: `env`, `yaml`.
-
-## 📐 Manajemen Skema
-
-### `naru schema add [KEY] [--type <TYPE>] [--description <DESC>] [--secret]`
-Menambahkan field ke skema. Jika `KEY` tidak diberikan, akan menjalankan wizard interaktif.
-
-### `naru schema edit [KEY]`
-Mengubah properti field yang sudah ada melalui prompt interaktif.
-
-### `naru schema remove [KEY]`
-Menghapus field dari skema.
+### `naru schema add`
+Adds a new field to the schema. Can be used interactively or with flags:
+- `--key`: Field name.
+- `--type`: Data type (`string`, `integer`, `boolean`).
+- `--pattern`: Regex pattern for strings.
+- `--secret`: Mark as secret.
 
 ### `naru schema view`
-Menampilkan aturan skema saat ini.
+Displays the current validation schema in a readable format.
 
-## 🔒 Keamanan & Utilitas
+## 🕵️ Audit & Security
+
+### `naru audit log`
+Shows the most recent configuration changes.
+- `--count`: Number of entries to show (default: 10).
+
+### `naru audit verify`
+Performs a cryptographic integrity check on the entire audit log trail.
 
 ### `naru validate`
-Memeriksa apakah data di `config.json` masih mematuhi aturan di `schema.json`, termasuk pengecekan status enkripsi.
+Validates all configuration values in the project against the defined schema rules.
 
-### `naru audit [--count <N>]`
-Menampilkan `N` baris terakhir dari log audit.
+## 🔄 Import & Export
 
-### `naru backup create <FILE_PATH>` / `naru backup restore <FILE_PATH>`
-Membuat atau memulihkan cadangan lengkap (data + skema).
+### `naru import <FILE>`
+Imports configurations from external files.
+- Supports `.env`, `.json`, `.yaml`.
+- `--env, -e`: Target environment.
 
-### `naru convert <FROM_FILE> <TO_FILE> --from-format <F> --to-format <T>`
-Mengonversi file konfigurasi antar format tanpa menyimpannya ke sistem Naru.
+### `naru export <ENV>`
+Exports configurations from Naru to a file.
+- `--file`: Output path.
+- `--format`: `env` or `yaml`.
 
----
-**Penting**: Sebagian besar operasi yang melibatkan data rahasia memerlukan variabel environment `NARU_ENCRYPTION_KEY` (32 karakter).
+## 🔐 Cryptography Commands
+
+### `naru crypto encrypt <INPUT> <OUTPUT>`
+Encrypts a standalone file using the project's master key.
+
+### `naru crypto decrypt <INPUT> <OUTPUT>`
+Decrypts a previously encrypted file.

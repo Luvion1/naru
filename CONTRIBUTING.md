@@ -1,47 +1,38 @@
 # Contributing to Naru
 
-First off, thank you for considering contributing to Naru! It's people like you that make Naru such a great tool.
+Thank you for your interest in Naru! We welcome contributions from everyone to help make our security ecosystem stronger.
 
-## 🌈 Code of Conduct
-By participating in this project, you agree to abide by our terms. Please be respectful and professional in all interactions.
+## 🛠️ Development Setup
 
-## 🚀 How Can I Contribute?
+1. **Prerequisites**: Ensure you have the latest stable Rust toolchain installed.
+2. **Clone**: `git clone https://github.com/Luvion1/naru.git`
+3. **Test**: Run `cargo test -- --test-threads=1` to ensure a clean state.
+4. **Lint**: Use `cargo clippy -- -D warnings` and `cargo fmt --all -- --check`.
 
-### Reporting Bugs
-- Use the **Bug Report** template on GitHub.
-- Describe the expected behavior vs actual behavior.
-- Include your OS and Naru version.
+## 📜 Contribution Guidelines
 
-### Suggesting Enhancements
-- Check if the feature has already been suggested.
-- Provide a clear use-case for the enhancement.
+### Bug Reports
+- Use the provided GitHub issue template.
+- Include reproduction steps and your environment details (OS, Naru version).
+
+### Feature Requests
+- Please open an issue to discuss the feature before implementing it.
+- Security-related features require a brief design proposal.
 
 ### Pull Requests
-1. Fork the repo and create your branch from `master`.
-2. If you've added code that should be tested, add tests.
-3. Ensure the test suite passes (`cargo test`).
-4. Format your code with `cargo fmt`.
-5. Run `cargo clippy` to check for common mistakes.
-6. Issue the PR!
+- Keep PRs focused on a single change.
+- **Tests are mandatory**. Every bug fix or feature must include unit tests.
+- Ensure your code follows the existing style and is "Clippy-clean".
 
-## 💻 Development Setup
+## 🛡️ Security Vulnerabilities
+**Do not open a public issue.** Please report security vulnerabilities privately to the maintainers at `security@luvion.io`.
 
-```bash
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+## 🏗️ Commit Message Convention
+We follow [Conventional Commits](https://www.conventionalcommits.org/):
+- `feat:` for new features.
+- `fix:` for bug fixes.
+- `docs:` for documentation changes.
+- `refactor:` for code changes that neither fix a bug nor add a feature.
 
-# Clone your fork
-git clone https://github.com/YOUR_USERNAME/naru.git
-cd naru
-
-# Build and test
-cargo build
-cargo test
-```
-
-## 📜 Style Guide
-- Follow standard Rust naming conventions (`snake_case` for functions/variables, `PascalCase` for types).
-- Use `anyhow` for application-level error handling.
-- Keep functions small and focused on a single responsibility.
-
-Thank you for your support!
+---
+*Happy Hacking!*
