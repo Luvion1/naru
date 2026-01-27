@@ -108,6 +108,8 @@ pub enum Commands {
     Validate,
     /// Show version information
     Version,
+    /// 🐱 Meow! Show the Naru mascot
+    Meow,
 }
 
 #[derive(Subcommand)]
