@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" width="150" alt="Naru Logo">
+  <img src="assets/logo.svg" width="350" alt="Naru Logo">
 </p>
 
 # 🛡️ Naru

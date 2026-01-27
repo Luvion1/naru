@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100">
-  <!-- Minimalist Sleeping Cat Silhouette (ASCII-inspired) -->
-  <path d="M50 80 C 50 80, 60 40, 90 40 C 120 40, 130 60, 160 60 C 190 60, 200 30, 230 30 C 260 30, 270 50, 270 50 L 280 60 C 280 60, 290 70, 260 80 L 50 80" fill="none" stroke="#2c3e50" stroke-width="4" stroke-linecap="round"/>
-  <path d="M85 40 L 80 20 L 95 35" fill="none" stroke="#2c3e50" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M105 40 L 110 20 L 115 35" fill="none" stroke="#2c3e50" stroke-width="3" stroke-linejoin="round"/>
-  <text x="20" y="50" font-family="monospace" font-size="12" fill="#34495e">ZZZzz</text>
+  <rect width="100%" height="100%" fill="transparent" />
+  <text x="20" y="30" font-family="monospace" font-size="14" fill="#2c3e50" xml:space="preserve">      |\      _,,,---,,_</text>
+  <text x="20" y="45" font-family="monospace" font-size="14" fill="#2c3e50" xml:space="preserve">ZZZzz / ,`.-&apos;`&apos;    -.  ;-;;,_</text>
+  <text x="20" y="60" font-family="monospace" font-size="14" fill="#2c3e50" xml:space="preserve">     |,4-  ) )-,_. ,\ (  `&apos;-&apos;</text>
+  <text x="20" y="75" font-family="monospace" font-size="14" fill="#2c3e50" xml:space="preserve">    &apos;---&apos;&apos;(_/--&apos;  `-&apos;\_)</text>
 </svg>
