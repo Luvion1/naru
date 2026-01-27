@@ -108,7 +108,9 @@ impl AuditLogEntry {
             None // File does not exist (genesis)
         };
 
-        self.previous_hash = prev_hash.or_else(|| Some("0000000000000000000000000000000000000000000000000000000000000000".to_string()));
+        self.previous_hash = prev_hash.or_else(|| {
+            Some("0000000000000000000000000000000000000000000000000000000000000000".to_string())
+        });
         self.hash = Some(self.calculate_hash());
 
         let mut file = OpenOptions::new()
@@ -147,7 +149,7 @@ impl AuditLogEntry {
         };
         Ok(entries.into_iter().skip(start).collect())
     }
-    
+
     // Function to verify the integrity of the audit log
     pub fn verify_log_integrity(log_path: &str) -> Result<bool, Box<dyn std::error::Error>> {
         if !Path::new(log_path).exists() {
@@ -156,12 +158,13 @@ impl AuditLogEntry {
 
         let file = fs::File::open(log_path)?;
         let reader = std::io::BufReader::new(file);
-        
-        let mut expected_prev_hash = "0000000000000000000000000000000000000000000000000000000000000000".to_string();
+
+        let mut expected_prev_hash =
+            "0000000000000000000000000000000000000000000000000000000000000000".to_string();
 
         for line in reader.lines().map_while(Result::ok) {
             let entry: AuditLogEntry = serde_json::from_str(&line)?;
-            
+
             // Check if previous hash matches
             if let Some(ph) = &entry.previous_hash {
                 if ph != &expected_prev_hash {
@@ -221,47 +224,46 @@ mod tests {
         let log_path_str = log_path.to_str().unwrap();
 
         // First log
-        log_action(
-            "SET",
-            "dev",
-            Some("key1"),
-            None,
-            Some("val1"),
-            log_path_str,
-        )
-        .unwrap();
+        log_action("SET", "dev", Some("key1"), None, Some("val1"), log_path_str).unwrap();
 
         // Second log
-        log_action(
-            "SET",
-            "dev",
-            Some("key2"),
-            None,
-            Some("val2"),
-            log_path_str,
-        )
-        .unwrap();
+        log_action("SET", "dev", Some("key2"), None, Some("val2"), log_path_str).unwrap();
 
         let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
         assert_eq!(logs.len(), 2);
-        
+
         // Check genesis hash
-        assert_eq!(logs[0].previous_hash.as_deref(), Some("0000000000000000000000000000000000000000000000000000000000000000"));
-        
+        assert_eq!(
+            logs[0].previous_hash.as_deref(),
+            Some("0000000000000000000000000000000000000000000000000000000000000000")
+        );
+
         // Check chain
         assert_eq!(logs[1].previous_hash, logs[0].hash);
-        
+
         // Verify integrity
         assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
     }
 
     #[test]
     fn test_audit_masking() {
-        let entry = AuditLogEntry::new("SET".to_string(), "dev".to_string(), Some("DB_PASSWORD".to_string()), Some("old_secret".to_string()), Some("new_secret".to_string()));
+        let entry = AuditLogEntry::new(
+            "SET".to_string(),
+            "dev".to_string(),
+            Some("DB_PASSWORD".to_string()),
+            Some("old_secret".to_string()),
+            Some("new_secret".to_string()),
+        );
         assert_eq!(entry.old_value, Some("********".to_string()));
         assert_eq!(entry.new_value, Some("********".to_string()));
-        
-        let entry_safe = AuditLogEntry::new("SET".to_string(), "dev".to_string(), Some("PUBLIC_PORT".to_string()), Some("8080".to_string()), Some("9090".to_string()));
+
+        let entry_safe = AuditLogEntry::new(
+            "SET".to_string(),
+            "dev".to_string(),
+            Some("PUBLIC_PORT".to_string()),
+            Some("8080".to_string()),
+            Some("9090".to_string()),
+        );
         assert_eq!(entry_safe.old_value, Some("8080".to_string()));
     }
 }

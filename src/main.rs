@@ -862,12 +862,9 @@ fn main() -> Result<()> {
 
                         for log in logs {
                             let key_str = log.key.clone().unwrap_or_else(|| "-".to_string());
-                            let user_str = log.user.clone().unwrap_or_else(|| "unknown".to_string());
-                            let hash_short = log
-                                .hash
-                                .as_ref()
-                                .map(|h| &h[..8])
-                                .unwrap_or("none");
+                            let user_str =
+                                log.user.clone().unwrap_or_else(|| "unknown".to_string());
+                            let hash_short = log.hash.as_ref().map(|h| &h[..8]).unwrap_or("none");
 
                             println!(
                                 "{:<20} | {:<10} | {:<12} | {:<15} | {:<15} | {:<10}",
