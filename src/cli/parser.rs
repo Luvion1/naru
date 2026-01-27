@@ -99,16 +99,27 @@ pub enum Commands {
         #[command(subcommand)]
         action: CryptoAction,
     },
-    /// Show audit logs
+    /// View or verify audit logs
     Audit {
-        /// Number of recent entries to show
-        #[arg(long, default_value = "10")]
-        count: usize,
+        #[command(subcommand)]
+        action: AuditAction,
     },
     /// Validate configurations against schema
     Validate,
     /// Show version information
     Version,
+}
+
+#[derive(Subcommand)]
+pub enum AuditAction {
+    /// Show recent audit logs
+    Log {
+        /// Number of recent entries to show
+        #[arg(long, default_value = "10")]
+        count: usize,
+    },
+    /// Verify the integrity of the audit log (Tamper-evident check)
+    Verify,
 }
 
 #[derive(Subcommand)]

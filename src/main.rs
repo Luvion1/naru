@@ -594,8 +594,14 @@ fn main() -> Result<()> {
                 return Err(anyhow::anyhow!("Environment '{}' not found.", env2));
             }
 
-            let env1_config = config.environments.get(&env1).unwrap();
-            let env2_config = config.environments.get(&env2).unwrap();
+            let env1_config = config
+                .environments
+                .get(&env1)
+                .ok_or_else(|| anyhow::anyhow!("Environment '{}' missing from config", env1))?;
+            let env2_config = config
+                .environments
+                .get(&env2)
+                .ok_or_else(|| anyhow::anyhow!("Environment '{}' missing from config", env2))?;
 
             println!("\nDiff between '{}' and '{}':", env1, env2);
             println!("{}", "-".repeat(60));
@@ -835,29 +841,62 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Audit { count } => {
+        Commands::Audit { action } => {
             let log_path = format!("{}/audit.log", NARU_DIR);
-            let logs = crate::core::audit::AuditLogEntry::get_recent_logs(&log_path, count)
-                .map_err(|e| anyhow::anyhow!("Failed to read audit logs: {}", e))?;
 
-            if logs.is_empty() {
-                println!("No audit logs found.");
-            } else {
-                println!("\nRecent Audit Logs (lastЧто?):");
-                println!("{}", "-".repeat(80));
-                for log in logs {
-                    let key_str = log.key.clone().unwrap_or_else(|| "-".to_string());
-                    let user_str = log.user.clone().unwrap_or_else(|| "unknown".to_string());
-                    println!(
-                        "[{}] {} - {} - Key: {} - User: {}",
-                        log.timestamp.format("%Y-%m-%d %H:%M:%S"),
-                        log.action,
-                        log.environment,
-                        key_str,
-                        user_str
-                    );
+            match action {
+                cli::parser::AuditAction::Log { count } => {
+                    let logs = crate::core::audit::AuditLogEntry::get_recent_logs(&log_path, count)
+                        .map_err(|e| anyhow::anyhow!("Failed to read audit logs: {}", e))?;
+
+                    if logs.is_empty() {
+                        println!("No audit logs found.");
+                    } else {
+                        println!("\nRecent Audit Logs (last {} entries):", count);
+                        println!("{}", "-".repeat(100));
+                        println!(
+                            "{:<20} | {:<10} | {:<12} | {:<15} | {:<15} | {:<10}",
+                            "Timestamp", "Action", "Env", "Key", "User", "Hash"
+                        );
+                        println!("{}", "-".repeat(100));
+
+                        for log in logs {
+                            let key_str = log.key.clone().unwrap_or_else(|| "-".to_string());
+                            let user_str = log.user.clone().unwrap_or_else(|| "unknown".to_string());
+                            let hash_short = log
+                                .hash
+                                .as_ref()
+                                .map(|h| &h[..8])
+                                .unwrap_or("none");
+
+                            println!(
+                                "{:<20} | {:<10} | {:<12} | {:<15} | {:<15} | {:<10}",
+                                log.timestamp.format("%Y-%m-%d %H:%M:%S"),
+                                log.action,
+                                log.environment,
+                                key_str,
+                                user_str,
+                                hash_short
+                            );
+                        }
+                        println!("{}", "-".repeat(100));
+                    }
                 }
-                println!("{}", "-".repeat(80));
+                cli::parser::AuditAction::Verify => {
+                    println!("Verifying audit log integrity...");
+                    match crate::core::audit::AuditLogEntry::verify_log_integrity(&log_path) {
+                        Ok(true) => {
+                            println!("✅ Audit log integrity verified. No tampering detected.");
+                        }
+                        Ok(false) => {
+                            println!("❌ CRITICAL: Audit log integrity check FAILED!");
+                            println!("The audit trail may have been tampered with or corrupted.");
+                        }
+                        Err(e) => {
+                            println!("⚠️ Error during verification: {}", e);
+                        }
+                    }
+                }
             }
         }
         Commands::Validate => {

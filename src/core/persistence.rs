@@ -416,6 +416,7 @@ pub fn decrypt_if_needed(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use tempfile::TempDir;
 
     /// Guard to revert current directory on drop
@@ -438,6 +439,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_save_and_load_json() {
         let temp_dir = TempDir::new().unwrap();
         let _guard = TestDirGuard::new(temp_dir.path());
@@ -458,6 +460,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_import_from_env() {
         let temp_dir = TempDir::new().unwrap();
         let _guard = TestDirGuard::new(temp_dir.path());
@@ -475,6 +478,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_import_from_json() {
         let temp_dir = TempDir::new().unwrap();
         let _guard = TestDirGuard::new(temp_dir.path());

@@ -66,6 +66,7 @@ pub fn update_field(key: &str, updated_field: FieldDefinition) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::path::Path;
     use tempfile::TempDir;
 
@@ -89,6 +90,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schema_operations() {
         let temp_dir = TempDir::new().unwrap();
         let _guard = TestDirGuard::new(temp_dir.path());
