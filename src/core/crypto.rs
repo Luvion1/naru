@@ -126,4 +126,68 @@ mod tests {
         // Each encryption should have a different nonce, thus different output
         assert_ne!(encrypted1, encrypted2);
     }
+
+    #[test]
+    fn test_encrypt_empty_string() {
+        let key = [0u8; 32];
+        let data = "";
+        let encrypted = encrypt_data(data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_decrypt_invalid_hex() {
+        let key = [0u8; 32];
+        let result = decrypt_data("not-hex-at-all", &key);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_decrypt_too_short() {
+        let key = [0u8; 32];
+        let result = decrypt_data("aabbccddeeff", &key); // Less than 12 bytes nonce
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_decrypt_corrupted_ciphertext() {
+        let key = [0u8; 32];
+        let data = "original secret";
+        let encrypted = encrypt_data(data, &key).unwrap();
+
+        // Corrupt one character in the ciphertext part
+        let mut corrupted = encrypted.clone();
+        if let Some(last_char) = corrupted.pop() {
+            let new_char = if last_char == '0' { '1' } else { '0' };
+            corrupted.push(new_char);
+        }
+
+        let result = decrypt_data(&corrupted, &key);
+        assert!(
+            result.is_err(),
+            "Decryption should fail if ciphertext is tampered"
+        );
+    }
+
+    #[test]
+    fn test_decrypt_with_wrong_key() {
+        let key1 = [1u8; 32];
+        let key2 = [2u8; 32];
+        let data = "super secret";
+
+        let encrypted = encrypt_data(data, &key1).unwrap();
+        let result = decrypt_data(&encrypted, &key2);
+
+        assert!(result.is_err(), "Decryption must fail with wrong key");
+    }
+
+    #[test]
+    fn test_encrypt_decrypt_unicode_data() {
+        let key = [0u8; 32];
+        let data = "秘事: 🚀🦀";
+        let encrypted = encrypt_data(data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
 }

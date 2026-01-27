@@ -91,4 +91,41 @@ mod tests {
         assert_eq!(field.key, "db_host");
         assert!(field.description.is_some());
     }
+
+    #[test]
+    fn test_config_file_clone() {
+        let mut environments = HashMap::new();
+        let mut entries = HashMap::new();
+        entries.insert("K1".into(), ConfigValueEntry::new("V1", "string", false));
+        environments.insert("dev".into(), EnvironmentConfig { entries });
+
+        let config = ConfigFile {
+            project_name: "Test".into(),
+            version: "1.0".into(),
+            environments,
+        };
+
+        let cloned = config.clone();
+        assert_eq!(cloned.project_name, config.project_name);
+        assert_eq!(cloned.environments.len(), config.environments.len());
+    }
+
+    #[test]
+    fn test_empty_config_value_entry() {
+        let entry = ConfigValueEntry::new("", "string", false);
+        assert_eq!(entry.value, "");
+    }
+
+    #[test]
+    fn test_config_value_entry_validation_mismatch() {
+        let entry = ConfigValueEntry::new("not_an_int", "integer", false);
+        let field = FieldDefinition {
+            key: "test".into(),
+            r#type: "integer".into(),
+            description: None,
+            validation: None,
+            is_secret: false,
+        };
+        assert!(entry.validate(&field).is_err());
+    }
 }

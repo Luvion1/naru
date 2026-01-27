@@ -257,6 +257,15 @@ mod tests {
         assert_eq!(entry.old_value, Some("********".to_string()));
         assert_eq!(entry.new_value, Some("********".to_string()));
 
+        let entry_token = AuditLogEntry::new(
+            "SET".to_string(),
+            "dev".to_string(),
+            Some("API_TOKEN".to_string()),
+            None,
+            Some("super-token".to_string()),
+        );
+        assert_eq!(entry_token.new_value, Some("********".to_string()));
+
         let entry_safe = AuditLogEntry::new(
             "SET".to_string(),
             "dev".to_string(),
@@ -265,5 +274,135 @@ mod tests {
             Some("9090".to_string()),
         );
         assert_eq!(entry_safe.old_value, Some("8080".to_string()));
+    }
+
+    #[test]
+    fn test_audit_integrity_verification() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        // 1. Create a valid chain
+        log_action("SET", "dev", Some("key1"), None, Some("val1"), log_path_str).unwrap();
+        log_action("SET", "dev", Some("key2"), None, Some("val2"), log_path_str).unwrap();
+
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+
+        // 2. Tamper with the first line
+        let content = std::fs::read_to_string(log_path_str).unwrap();
+        let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+
+        // Change a value in the first entry
+        let mut entry1: AuditLogEntry = serde_json::from_str(&lines[0]).unwrap();
+        entry1.action = "TAMPERED".to_string();
+        lines[0] = serde_json::to_string(&entry1).unwrap();
+
+        std::fs::write(log_path_str, lines.join("\n") + "\n").unwrap();
+
+        // 3. Verify integrity fails
+        assert!(
+            !AuditLogEntry::verify_log_integrity(log_path_str).unwrap(),
+            "Integrity check should fail after tampering"
+        );
+    }
+
+    #[test]
+    fn test_audit_integrity_timestamp_tamper() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_time.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        log_action("SET", "dev", Some("k"), None, Some("v"), log_path_str).unwrap();
+
+        let content = std::fs::read_to_string(log_path_str).unwrap();
+        let mut entry: AuditLogEntry = serde_json::from_str(&content).unwrap();
+
+        // Manipulate timestamp by 1 second
+        entry.timestamp += chrono::Duration::seconds(1);
+        let tampered = serde_json::to_string(&entry).unwrap() + "\n";
+        std::fs::write(log_path_str, tampered).unwrap();
+
+        assert!(
+            !AuditLogEntry::verify_log_integrity(log_path_str).unwrap(),
+            "Integrity should fail if timestamp is changed"
+        );
+    }
+
+    #[test]
+    fn test_audit_integrity_user_tamper() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_user.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        log_action("SET", "dev", Some("k"), None, Some("v"), log_path_str).unwrap();
+
+        let content = std::fs::read_to_string(log_path_str).unwrap();
+        let mut entry: AuditLogEntry = serde_json::from_str(&content).unwrap();
+
+        entry.user = Some("hacker".to_string());
+        let tampered = serde_json::to_string(&entry).unwrap() + "\n";
+        std::fs::write(log_path_str, tampered).unwrap();
+
+        assert!(
+            !AuditLogEntry::verify_log_integrity(log_path_str).unwrap(),
+            "Integrity should fail if user is changed"
+        );
+    }
+
+    #[test]
+    fn test_audit_integrity_swap_values() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_swap.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        log_action(
+            "SET",
+            "dev",
+            Some("k"),
+            Some("v1"),
+            Some("v2"),
+            log_path_str,
+        )
+        .unwrap();
+
+        let content = std::fs::read_to_string(log_path_str).unwrap();
+        let mut entry: AuditLogEntry = serde_json::from_str(&content).unwrap();
+
+        // Swap values
+        let old = entry.old_value.clone();
+        entry.old_value = entry.new_value.clone();
+        entry.new_value = old;
+
+        let tampered = serde_json::to_string(&entry).unwrap() + "\n";
+        std::fs::write(log_path_str, tampered).unwrap();
+
+        assert!(
+            !AuditLogEntry::verify_log_integrity(log_path_str).unwrap(),
+            "Integrity should fail if values are swapped"
+        );
+    }
+
+    #[test]
+    fn test_audit_integrity_phash_tamper() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_phash.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        log_action("ACTION1", "env", None, None, None, log_path_str).unwrap();
+        log_action("ACTION2", "env", None, None, None, log_path_str).unwrap();
+
+        let content = std::fs::read_to_string(log_path_str).unwrap();
+        let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+
+        let mut entry2: AuditLogEntry = serde_json::from_str(&lines[1]).unwrap();
+        entry2.previous_hash = Some("fake_hash".to_string());
+        lines[1] = serde_json::to_string(&entry2).unwrap();
+
+        std::fs::write(log_path_str, lines.join("\n") + "\n").unwrap();
+
+        assert!(
+            !AuditLogEntry::verify_log_integrity(log_path_str).unwrap(),
+            "Integrity should fail if previous_hash is tampered"
+        );
     }
 }

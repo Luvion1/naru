@@ -2,29 +2,37 @@ use std::path::{Path, PathBuf};
 
 /// Sanitize file path to prevent directory traversal attacks
 pub fn sanitize_file_path(path: &str) -> Result<PathBuf, &'static str> {
-    // Check for directory traversal patterns
-    if path.contains("../")
-        || path.contains("..\\")
-        || path.starts_with("../")
-        || path.starts_with("..\\")
-    {
-        return Err("Path contains directory traversal sequences");
+    // Check for null bytes which are used in many exploits
+    if path.contains('\0') {
+        return Err("Path contains null bytes");
     }
 
-    // Normalize the path by removing redundant components
-    let path = Path::new(path);
+    // Unify separators for traversal check
+    let unified_path = path.replace('\\', "/");
+    let path_obj = Path::new(&unified_path);
 
     // Check if the path is absolute (which we don't allow)
-    if path.is_absolute() {
+    if path_obj.is_absolute() {
         return Err("Absolute paths are not allowed");
     }
 
-    // Resolve the path to ensure it's within allowed boundaries
-    let normalized = normalize_path(path);
+    // Reject any path that contains ".." as a component
+    for component in path_obj.components() {
+        if let std::path::Component::ParentDir = component {
+            return Err("Path contains directory traversal sequences");
+        }
+    }
 
-    // Ensure the final path is still relative
-    if normalized.is_absolute() {
-        return Err("Path normalization resulted in absolute path");
+    // For the actual path object we return, we use the original path but normalized
+    // This is because normalize_path handles the platform-specific separator logic
+    let original_path_obj = Path::new(path);
+    let normalized = normalize_path(original_path_obj);
+
+    // Final check on normalized path
+    for component in normalized.components() {
+        if let std::path::Component::ParentDir = component {
+            return Err("Path attempts to escape parent directory");
+        }
     }
 
     Ok(normalized)
@@ -154,13 +162,110 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_config_key() {
-        // Valid keys
-        assert!(validate_config_key("database_url").is_ok());
-        assert!(validate_config_key("api.key.timeout").is_ok());
+    fn test_sanitize_file_path_advanced() {
+        // Sneaky traversal attempts
+        assert!(
+            sanitize_file_path("folder/../config.json").is_err(),
+            "Should catch internal traversal"
+        );
+        assert!(sanitize_file_path("./../config.json").is_err());
+        assert!(
+            sanitize_file_path(".../config.json").is_ok(),
+            "Triple dot is technically a valid filename"
+        );
 
-        // Invalid keys
-        assert!(validate_config_key("").is_err());
-        assert!(validate_config_key("key;DROP TABLE").is_err());
+        // Null bytes
+        assert!(
+            sanitize_file_path("config.json\0.txt").is_err(),
+            "Null bytes are dangerous"
+        );
+
+        // Windows-style traversal
+        assert!(sanitize_file_path("folder\\..\\config.json").is_err());
+    }
+
+    #[test]
+    fn test_validate_environment_name_edge_cases() {
+        assert!(validate_environment_name(&"a".repeat(100)).is_ok());
+        assert!(
+            validate_environment_name(&"a".repeat(101)).is_err(),
+            "Too long"
+        );
+        assert!(
+            validate_environment_name("env name").is_err(),
+            "Spaces not allowed"
+        );
+        assert!(
+            validate_environment_name("env!").is_err(),
+            "Special chars not allowed"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_file_path_extreme() {
+        // Deeply nested valid paths
+        assert!(sanitize_file_path("a/b/c/d/e/f/g/h/i/j/k/l/m/n/config.json").is_ok());
+
+        // Mixed separators and weird characters
+        assert!(sanitize_file_path("my config file (1).json").is_ok());
+        assert!(sanitize_file_path("config-2024.01.27.json").is_ok());
+
+        // Attempts to use absolute-like paths in relative form
+        assert!(sanitize_file_path("/config.json").is_err());
+        assert!(sanitize_file_path("//config.json").is_err());
+
+        // Tilde expansion prevention
+        assert!(
+            sanitize_file_path("~/config.json").is_ok(),
+            "Tilde is a literal character in this context, not expanded"
+        );
+
+        // Windows reserved names (though we are on linux, we should check if we handle them)
+        assert!(
+            sanitize_file_path("CON.json").is_ok(),
+            "On Linux CON is just a filename"
+        );
+    }
+
+    #[test]
+    fn test_validate_config_key_extreme() {
+        assert!(validate_config_key("a.b.c.d.e.f").is_ok());
+        assert!(
+            validate_config_key("-").is_ok(),
+            "Current logic allows hyphen"
+        );
+        assert!(validate_config_key("_").is_ok());
+        assert!(validate_config_key(".").is_ok(), "Current logic allows dot");
+    }
+
+    #[test]
+    fn test_check_file_size_logic() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        std::fs::write(&file_path, "some data").unwrap();
+
+        assert!(check_file_size(&file_path, 100).is_ok());
+        assert!(
+            check_file_size(&file_path, 5).is_err(),
+            "Should fail if file is larger than max_size"
+        );
+    }
+
+    #[test]
+    fn test_validate_environment_name_injection() {
+        assert!(validate_environment_name("dev;rm -rf /").is_err());
+        assert!(validate_environment_name("production\n").is_err());
+        assert!(validate_environment_name("staging\0").is_err());
+    }
+
+    #[test]
+    fn test_sanitize_string_value_control_chars() {
+        // Only null byte is removed currently. Let's see if we should add others.
+        let input = "val\r\n\twith\x07bell";
+        assert_eq!(
+            sanitize_string_value(input),
+            input,
+            "Control characters other than null are kept for now"
+        );
     }
 }

@@ -62,4 +62,24 @@ mod tests {
         drop(lock1);
         assert!(!target_file.with_extension("lock").exists());
     }
+
+    #[test]
+    fn test_lock_non_existent_directory() {
+        let target_file = Path::new("/non/existent/path/file.json");
+        let result = FileLock::acquire_exclusive(target_file);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rapid_relock() {
+        let temp_dir = TempDir::new().unwrap();
+        let target_file = temp_dir.path().join("test.json");
+
+        for _ in 0..10 {
+            let lock = FileLock::acquire_exclusive(&target_file).unwrap();
+            assert!(lock.path.exists());
+            drop(lock);
+            assert!(!target_file.with_extension("lock").exists());
+        }
+    }
 }
