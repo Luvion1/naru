@@ -1,13 +1,10 @@
-# 🛡️ Naru 🐱
+<p align="center">
+  <img src="assets/logo.svg" width="150" alt="Naru Logo">
+</p>
+
+# 🛡️ Naru
 
 ### *Securing the Backbone of Modern Applications*
-
-```text
-      |\      _,,,---,,_
-ZZZzz /,`.-'`'    -.  ;-;;,_
-     |,4-  ) )-,_. ,\ (  `'-'
-    '---''(_/--'  `-'\_)
-```
 
 [![Rust 2024](https://img.shields.io/badge/Rust-2024-orange?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
 [![AES-256-GCM](https://img.shields.io/badge/Security-AES--256--GCM-green?style=for-the-badge)](docs/security-model.md)
