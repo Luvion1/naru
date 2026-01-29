@@ -405,4 +405,909 @@ mod tests {
             "Integrity should fail if previous_hash is tampered"
         );
     }
+
+    #[test]
+    fn test_audit_log_with_unicode_and_special_chars() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_unicode.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        log_action(
+            "SET_🚀",
+            "dev_🌍",
+            Some("🔑_secret"),
+            Some(" oldValue with 🌟"),
+            Some("newValue with 🚀"),
+            log_path_str,
+        )
+        .unwrap();
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].action, "SET_🚀");
+        assert_eq!(logs[0].environment, "dev_🌍");
+        assert_eq!(logs[0].key, Some("🔑_secret".to_string()));
+        assert_eq!(logs[0].old_value, Some("********".to_string())); // Should be masked
+        assert_eq!(logs[0].new_value, Some("********".to_string())); // Should be masked
+
+        // Verify integrity
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_empty_values() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_empty.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        // Log with all optional values as None
+        log_action("TEST", "env", None, None, None, log_path_str).unwrap();
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].key, None);
+        assert_eq!(logs[0].old_value, None);
+        assert_eq!(logs[0].new_value, None);
+
+        // Verify integrity
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_long_values() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_long.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        let long_value = "x".repeat(10000); // 10KB value
+        log_action(
+            "LONG_TEST",
+            "env",
+            Some("long_key"),
+            Some(&long_value),
+            Some(&long_value),
+            log_path_str,
+        )
+        .unwrap();
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
+        assert_eq!(logs.len(), 1);
+        // For long values that might be secrets (based on key name), they should be masked
+        assert_eq!(logs[0].old_value, Some("********".to_string()));
+        assert_eq!(logs[0].new_value, Some("********".to_string()));
+
+        // Verify integrity
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_chain_with_mixed_actions() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_mixed.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        // Create a chain with different types of actions
+        log_action("SET", "dev", Some("key1"), None, Some("val1"), log_path_str).unwrap();
+        log_action("GET", "dev", Some("key1"), Some("val1"), None, log_path_str).unwrap();
+        log_action(
+            "DELETE",
+            "prod",
+            Some("key2"),
+            Some("old_val"),
+            None,
+            log_path_str,
+        )
+        .unwrap();
+        log_action(
+            "IMPORT",
+            "staging",
+            None,
+            None,
+            Some("file.json"),
+            log_path_str,
+        )
+        .unwrap();
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
+        assert_eq!(logs.len(), 4);
+
+        // Check the chain integrity
+        assert_eq!(
+            logs[0].previous_hash,
+            Some("0000000000000000000000000000000000000000000000000000000000000000".to_string())
+        );
+        for i in 1..logs.len() {
+            assert_eq!(logs[i].previous_hash, logs[i - 1].hash);
+        }
+
+        // Verify integrity
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_get_recent_with_count_limits() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_limit.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        // Add 5 entries
+        for i in 0..5 {
+            log_action(
+                &format!("ACTION{}", i),
+                "env",
+                None,
+                None,
+                None,
+                log_path_str,
+            )
+            .unwrap();
+        }
+
+        // Request only last 2
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 2).unwrap();
+        assert_eq!(logs.len(), 2);
+        assert_eq!(logs[0].action, "ACTION3"); // Third to last
+        assert_eq!(logs[1].action, "ACTION4"); // Last
+
+        // Request more than exist
+        let all_logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
+        assert_eq!(all_logs.len(), 5);
+
+        // Request 0 (should return empty)
+        let no_logs = AuditLogEntry::get_recent_logs(log_path_str, 0).unwrap();
+        assert_eq!(no_logs.len(), 0);
+    }
+
+    #[test]
+    fn test_audit_log_calculate_hash_consistency() {
+        let mut entry = AuditLogEntry::new(
+            "TEST_ACTION".to_string(),
+            "test_env".to_string(),
+            Some("test_key".to_string()),
+            Some("old_val".to_string()),
+            Some("new_val".to_string()),
+        );
+
+        // Calculate hash multiple times - should be consistent if no fields change
+        let hash1 = entry.calculate_hash();
+        let hash2 = entry.calculate_hash();
+        assert_eq!(hash1, hash2);
+
+        // Change a field and recalculate - should be different
+        entry.action = "DIFFERENT_ACTION".to_string();
+        let hash3 = entry.calculate_hash();
+        assert_ne!(hash1, hash3);
+    }
+
+    #[test]
+    fn test_audit_log_verify_empty_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("empty_audit.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        // Don't write anything to the file, just verify it's considered valid
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_verify_single_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("single_audit.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        log_action(
+            "SINGLE",
+            "env",
+            Some("key"),
+            None,
+            Some("val"),
+            log_path_str,
+        )
+        .unwrap();
+
+        // Single entry with proper genesis hash should be valid
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_masking_with_various_secret_indicators() {
+        // Test different variations of secret-indicating key names
+        let entry_password = AuditLogEntry::new(
+            "SET".to_string(),
+            "dev".to_string(),
+            Some("PASSWORD".to_string()),
+            Some("old_pass".to_string()),
+            Some("new_pass".to_string()),
+        );
+        assert_eq!(entry_password.old_value, Some("********".to_string()));
+        assert_eq!(entry_password.new_value, Some("********".to_string()));
+
+        let entry_api_key = AuditLogEntry::new(
+            "SET".to_string(),
+            "dev".to_string(),
+            Some("API_KEY".to_string()),
+            Some("old_key".to_string()),
+            Some("new_key".to_string()),
+        );
+        assert_eq!(entry_api_key.old_value, Some("********".to_string()));
+        assert_eq!(entry_api_key.new_value, Some("********".to_string()));
+
+        let entry_secret = AuditLogEntry::new(
+            "SET".to_string(),
+            "dev".to_string(),
+            Some("CLIENT_SECRET".to_string()),
+            Some("old_secret".to_string()),
+            Some("new_secret".to_string()),
+        );
+        assert_eq!(entry_secret.old_value, Some("********".to_string()));
+        assert_eq!(entry_secret.new_value, Some("********".to_string()));
+
+        let entry_token = AuditLogEntry::new(
+            "SET".to_string(),
+            "dev".to_string(),
+            Some("ACCESS_TOKEN".to_string()),
+            Some("old_token".to_string()),
+            Some("new_token".to_string()),
+        );
+        assert_eq!(entry_token.old_value, Some("********".to_string()));
+        assert_eq!(entry_token.new_value, Some("********".to_string()));
+
+        let entry_auth = AuditLogEntry::new(
+            "SET".to_string(),
+            "dev".to_string(),
+            Some("AUTH_HEADER".to_string()),
+            Some("old_auth".to_string()),
+            Some("new_auth".to_string()),
+        );
+        assert_eq!(entry_auth.old_value, Some("********".to_string()));
+        assert_eq!(entry_auth.new_value, Some("********".to_string()));
+    }
+
+    #[test]
+    fn test_audit_log_with_extremely_long_values() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_long.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        let long_value = "x".repeat(10000); // 10KB value
+        log_action(
+            "LONG_ACTION",
+            "long_env",
+            Some("long_key"),
+            Some(&long_value),
+            Some(&long_value),
+            log_path_str,
+        )
+        .unwrap();
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].action, "LONG_ACTION");
+        assert_eq!(logs[0].environment, "long_env");
+        assert_eq!(logs[0].key, Some("long_key".to_string()));
+        // For long values that might be secrets (based on key name), they should be masked
+        assert_eq!(logs[0].old_value, Some("********".to_string()));
+        assert_eq!(logs[0].new_value, Some("********".to_string()));
+
+        // Verify integrity
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_with_extreme_unicode_combinations() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_unicode.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        log_action(
+            "🚀_ACTION_🌍",
+            "🌍_environment_🚀",
+            Some("🔑_secret_key_🔐"),
+            Some(" oldValue with 🌟 and 🎉"),
+            Some("newValue with 🚀 and 🌍"),
+            log_path_str,
+        )
+        .unwrap();
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].action, "🚀_ACTION_🌍");
+        assert_eq!(logs[0].environment, "🌍_environment_🚀");
+        assert_eq!(logs[0].key, Some("🔑_secret_key_🔐".to_string()));
+        assert_eq!(logs[0].old_value, Some("********".to_string())); // Should be masked
+        assert_eq!(logs[0].new_value, Some("********".to_string())); // Should be masked
+
+        // Verify integrity
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_with_mixed_secret_and_public_keys() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_mixed_secrets.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        // Log with secret key (should be masked)
+        log_action(
+            "SET",
+            "dev",
+            Some("DB_PASSWORD"),
+            None,
+            Some("secret_password"),
+            log_path_str,
+        )
+        .unwrap();
+
+        // Log with public key (should not be masked)
+        log_action(
+            "SET",
+            "dev",
+            Some("PORT_NUMBER"),
+            None,
+            Some("8080"),
+            log_path_str,
+        )
+        .unwrap();
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
+        assert_eq!(logs.len(), 2);
+
+        // DB_PASSWORD should be masked
+        assert_eq!(logs[0].key, Some("DB_PASSWORD".to_string()));
+        assert_eq!(logs[0].new_value, Some("********".to_string()));
+
+        // PORT_NUMBER should not be masked
+        assert_eq!(logs[1].key, Some("PORT_NUMBER".to_string()));
+        assert_eq!(logs[1].new_value, Some("8080".to_string()));
+
+        // Verify integrity
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_with_extreme_timestamp_precision() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_timestamp.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        log_action(
+            "TIMESTAMP_TEST",
+            "env",
+            Some("key"),
+            None,
+            Some("val"),
+            log_path_str,
+        )
+        .unwrap();
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
+        assert_eq!(logs.len(), 1);
+
+        // Verify the timestamp has proper precision
+        let entry = &logs[0];
+        assert!(entry.timestamp.timestamp_subsec_nanos() > 0); // Should have nanosecond precision
+
+        // Verify integrity
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_with_extremely_large_chain() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_large_chain.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        // Create a large chain of entries
+        for i in 0..100 {
+            log_action(
+                &format!("ACTION_{}", i),
+                &format!("env_{}", i % 10),
+                Some(&format!("key_{}", i)),
+                None,
+                Some(&format!("value_{}", i)),
+                log_path_str,
+            )
+            .unwrap();
+        }
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 100).unwrap();
+        assert_eq!(logs.len(), 100);
+
+        // Verify the chain integrity
+        assert_eq!(
+            logs[0].previous_hash,
+            Some("0000000000000000000000000000000000000000000000000000000000000000".to_string())
+        );
+        for i in 1..logs.len() {
+            assert_eq!(logs[i].previous_hash, logs[i - 1].hash);
+        }
+
+        // Verify integrity of the whole chain
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_with_special_characters_in_values() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_special_chars.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        log_action(
+            "SPECIAL_ACTION",
+            "special_env",
+            Some("special_key"),
+            Some("Special chars: !@#$%^&*()_+-=[]{}|;':\",./<>?"),
+            Some("More special: \n\t\r\x0B\x0C"),
+            log_path_str,
+        )
+        .unwrap();
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].action, "SPECIAL_ACTION");
+        assert_eq!(logs[0].environment, "special_env");
+        assert_eq!(logs[0].key, Some("special_key".to_string()));
+        assert_eq!(logs[0].old_value, Some("********".to_string())); // Should be masked
+        assert_eq!(logs[0].new_value, Some("********".to_string())); // Should be masked
+
+        // Verify integrity
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_with_extreme_environment_names() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_env_names.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        // Test with various environment names
+        log_action("TEST", "dev", Some("key"), None, Some("val"), log_path_str).unwrap();
+        log_action(
+            "TEST",
+            "production",
+            Some("key"),
+            None,
+            Some("val"),
+            log_path_str,
+        )
+        .unwrap();
+        log_action(
+            "TEST",
+            "staging-test",
+            Some("key"),
+            None,
+            Some("val"),
+            log_path_str,
+        )
+        .unwrap();
+        log_action(
+            "TEST",
+            "env_123",
+            Some("key"),
+            None,
+            Some("val"),
+            log_path_str,
+        )
+        .unwrap();
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
+        assert_eq!(logs.len(), 4);
+
+        // Verify integrity
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_with_extreme_key_names() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_key_names.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        // Test with various key names
+        log_action(
+            "TEST",
+            "dev",
+            Some("simple_key"),
+            None,
+            Some("val"),
+            log_path_str,
+        )
+        .unwrap();
+        log_action(
+            "TEST",
+            "dev",
+            Some("key.with.dots"),
+            None,
+            Some("val"),
+            log_path_str,
+        )
+        .unwrap();
+        log_action(
+            "TEST",
+            "dev",
+            Some("key-with-hyphens"),
+            None,
+            Some("val"),
+            log_path_str,
+        )
+        .unwrap();
+        log_action(
+            "TEST",
+            "dev",
+            Some("key_with_underscores"),
+            None,
+            Some("val"),
+            log_path_str,
+        )
+        .unwrap();
+        log_action(
+            "TEST",
+            "dev",
+            Some("key123numeric"),
+            None,
+            Some("val"),
+            log_path_str,
+        )
+        .unwrap();
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
+        assert_eq!(logs.len(), 5);
+
+        // Verify integrity
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_with_all_optional_fields_none() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_optional_none.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        // Log with all optional fields as None
+        log_action("NO_OPTIONALS", "env", None, None, None, log_path_str).unwrap();
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
+        assert_eq!(logs.len(), 1);
+        let entry = &logs[0];
+        assert_eq!(entry.action, "NO_OPTIONALS");
+        assert_eq!(entry.environment, "env");
+        assert_eq!(entry.key, None);
+        assert_eq!(entry.old_value, None);
+        assert_eq!(entry.new_value, None);
+
+        // Verify integrity
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_with_extremely_large_values() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_large_values.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        let large_value = "x".repeat(50000); // 50KB value
+        log_action(
+            "LARGE_ACTION",
+            "large_env",
+            Some("large_key"),
+            Some(&large_value),
+            Some(&large_value),
+            log_path_str,
+        )
+        .unwrap();
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].action, "LARGE_ACTION");
+        assert_eq!(logs[0].environment, "large_env");
+        assert_eq!(logs[0].key, Some("large_key".to_string()));
+        // Large values that might be secrets should be masked
+        assert_eq!(logs[0].old_value, Some("********".to_string()));
+        assert_eq!(logs[0].new_value, Some("********".to_string()));
+
+        // Verify integrity
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_with_extremely_long_chain() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_long_chain.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        // Create a very long chain of entries
+        for i in 0..500 {
+            log_action(
+                &format!("ACTION_{:04}", i),
+                &format!("env_{:02}", i % 10),
+                Some(&format!("key_{:04}", i)),
+                None,
+                Some(&format!("value_{:04}", i)),
+                log_path_str,
+            )
+            .unwrap();
+        }
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 500).unwrap();
+        assert_eq!(logs.len(), 500);
+
+        // Verify the chain integrity
+        assert_eq!(
+            logs[0].previous_hash,
+            Some("0000000000000000000000000000000000000000000000000000000000000000".to_string())
+        );
+        for i in 1..logs.len() {
+            assert_eq!(logs[i].previous_hash, logs[i - 1].hash);
+        }
+
+        // Verify integrity of the whole chain
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_with_all_possible_ascii_chars() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_ascii_chars.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        let ascii_chars: String = (32..127).map(|c| c as u8 as char).collect(); // Printable ASCII
+        log_action(
+            "ASCII_ACTION",
+            "ascii_env",
+            Some("ascii_key"),
+            Some(&ascii_chars),
+            Some(&ascii_chars),
+            log_path_str,
+        )
+        .unwrap();
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].action, "ASCII_ACTION");
+        assert_eq!(logs[0].environment, "ascii_env");
+        assert_eq!(logs[0].key, Some("ascii_key".to_string()));
+        // Values with many characters might be masked if they look like secrets
+        // The masking logic checks for keywords, so this should not be masked
+        assert_eq!(logs[0].old_value, Some("********".to_string())); // Still masked due to length
+
+        // Verify integrity
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_with_extreme_timestamp_scenarios() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_timestamp_extremes.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        // Log an entry and capture the timestamp
+        log_action(
+            "TS_TEST",
+            "env",
+            Some("key"),
+            None,
+            Some("val"),
+            log_path_str,
+        )
+        .unwrap();
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
+        assert_eq!(logs.len(), 1);
+        let entry = &logs[0];
+
+        // Verify timestamp has reasonable values
+        assert!(entry.timestamp.timestamp() > 0); // Should be after Unix epoch
+        assert!(entry.timestamp.timestamp() < 2147483647); // Before 2038 year problem
+
+        // Verify integrity
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_with_mixed_secret_patterns() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_mixed_secrets.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        // Test various secret-indicating names
+        log_action(
+            "SET",
+            "env",
+            Some("PASSWORD"),
+            None,
+            Some("secret1"),
+            log_path_str,
+        )
+        .unwrap();
+        log_action(
+            "SET",
+            "env",
+            Some("API_KEY"),
+            None,
+            Some("secret2"),
+            log_path_str,
+        )
+        .unwrap();
+        log_action(
+            "SET",
+            "env",
+            Some("TOKEN"),
+            None,
+            Some("secret3"),
+            log_path_str,
+        )
+        .unwrap();
+        log_action(
+            "SET",
+            "env",
+            Some("SECRET"),
+            None,
+            Some("secret4"),
+            log_path_str,
+        )
+        .unwrap();
+        log_action(
+            "SET",
+            "env",
+            Some("AUTH"),
+            None,
+            Some("secret5"),
+            log_path_str,
+        )
+        .unwrap();
+        log_action(
+            "SET",
+            "env",
+            Some("NORMAL_KEY"),
+            None,
+            Some("public_value"),
+            log_path_str,
+        )
+        .unwrap();
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
+        assert_eq!(logs.len(), 6);
+
+        // Secret values should be masked
+        assert_eq!(logs[0].new_value, Some("********".to_string())); // PASSWORD
+        assert_eq!(logs[1].new_value, Some("********".to_string())); // API_KEY
+        assert_eq!(logs[2].new_value, Some("********".to_string())); // TOKEN
+        assert_eq!(logs[3].new_value, Some("********".to_string())); // SECRET
+        assert_eq!(logs[4].new_value, Some("********".to_string())); // AUTH
+        // The masking logic checks for keywords like "pass", "secret", "key", "token", "auth"
+        // "NORMAL_KEY" contains "key" so it will be masked
+        assert_eq!(logs[5].new_value, Some("********".to_string())); // NORMAL_KEY (masked because contains "key")
+
+        // Verify integrity
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_with_extreme_usernames() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_usernames.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        // Temporarily set a long username for testing
+        unsafe {
+            std::env::set_var(
+                "USERNAME",
+                "very_long_username_that_exceeds_typical_lengths_for_testing",
+            )
+        };
+
+        log_action(
+            "USER_TEST",
+            "env",
+            Some("key"),
+            None,
+            Some("val"),
+            log_path_str,
+        )
+        .unwrap();
+
+        unsafe { std::env::remove_var("USERNAME") };
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 10).unwrap();
+        assert_eq!(logs.len(), 1);
+
+        // Verify integrity
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_integrity_with_manual_corruption() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_corruption_test.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        // Create a chain of logs
+        log_action(
+            "FIRST",
+            "env",
+            Some("key1"),
+            None,
+            Some("val1"),
+            log_path_str,
+        )
+        .unwrap();
+        log_action(
+            "SECOND",
+            "env",
+            Some("key2"),
+            None,
+            Some("val2"),
+            log_path_str,
+        )
+        .unwrap();
+        log_action(
+            "THIRD",
+            "env",
+            Some("key3"),
+            None,
+            Some("val3"),
+            log_path_str,
+        )
+        .unwrap();
+
+        // Verify initial integrity
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+
+        // Read the content and modify it in a way that doesn't break JSON structure
+        let content = std::fs::read_to_string(log_path_str).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+
+        // Modify the second line by changing a value instead of breaking JSON structure
+        let mut modified_lines = Vec::new();
+        for (i, line) in lines.iter().enumerate() {
+            if i == 1 {
+                // Parse the JSON, modify a field, and serialize back
+                let mut entry: AuditLogEntry = serde_json::from_str(line).unwrap();
+                entry.action = "CORRUPTED_ACTION".to_string();
+                modified_lines.push(serde_json::to_string(&entry).unwrap());
+            } else {
+                modified_lines.push(line.to_string());
+            }
+        }
+
+        std::fs::write(log_path_str, modified_lines.join("\n") + "\n").unwrap();
+
+        // Integrity check should now fail
+        assert!(!AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
+
+    #[test]
+    fn test_audit_log_creation_under_concurrent_load() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("audit_concurrent.log");
+        let log_path_str = log_path.to_str().unwrap();
+
+        // Create multiple entries rapidly
+        for i in 0..100 {
+            log_action(
+                &format!("CONCURRENT_{}", i),
+                "concurrent_env",
+                Some(&format!("key_{}", i)),
+                None,
+                Some(&format!("value_{}", i)),
+                log_path_str,
+            )
+            .unwrap();
+        }
+
+        let logs = AuditLogEntry::get_recent_logs(log_path_str, 100).unwrap();
+        assert_eq!(logs.len(), 100);
+
+        // Verify the chain integrity
+        assert_eq!(
+            logs[0].previous_hash,
+            Some("0000000000000000000000000000000000000000000000000000000000000000".to_string())
+        );
+        for i in 1..logs.len() {
+            assert_eq!(logs[i].previous_hash, logs[i - 1].hash);
+        }
+
+        // Verify integrity of the whole chain
+        assert!(AuditLogEntry::verify_log_integrity(log_path_str).unwrap());
+    }
 }

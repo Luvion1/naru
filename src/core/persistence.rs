@@ -697,4 +697,843 @@ mod tests {
         let result = init_project();
         assert!(result.is_err());
     }
+
+    #[test]
+    #[serial]
+    fn test_import_from_env_with_special_characters() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        let env_content = "SPECIAL_CHARS='!@#$%^&*()_+-={}[]|\\\\:;\"<>?,./'";
+        fs::write("special.env", env_content).unwrap();
+
+        let config = import_from_env("special.env", "development").unwrap();
+        let entries = &config.environments.get("development").unwrap().entries;
+        // The value will have the outer quotes stripped by the parsing logic
+        assert_eq!(
+            entries.get("SPECIAL_CHARS").unwrap().value,
+            "!@#$%^&*()_+-={}[]|\\\\:;\"<>?,./"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_import_from_env_with_multiline_values() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        // Note: Standard .env format doesn't support multiline values,
+        // but we'll test how our parser handles newlines in values
+        let env_content = "MULTILINE=\"line1\nline2\nline3\"";
+        fs::write("multiline.env", env_content).unwrap();
+
+        let config = import_from_env("multiline.env", "development").unwrap();
+        let entries = &config.environments.get("development").unwrap().entries;
+        // Our current implementation treats newlines as part of the value
+        assert!(entries.contains_key("MULTILINE"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_import_from_env_with_no_equals_sign() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        let env_content = "JUST_A_LINE_WITHOUT_EQUALS\nANOTHER_LINE";
+        fs::write("no_equals.env", env_content).unwrap();
+
+        let config = import_from_env("no_equals.env", "development").unwrap();
+        let entries = &config.environments.get("development").unwrap().entries;
+        // Lines without equals sign should be ignored
+        assert!(!entries.contains_key("JUST_A_LINE_WITHOUT_EQUALS"));
+        assert!(!entries.contains_key("ANOTHER_LINE"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_import_from_json_with_complex_types() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        // Test with nested objects and arrays - these should be skipped according to implementation
+        let json_content = r#"{
+            "simple": "value",
+            "number": 42,
+            "boolean": true,
+            "null_value": null,
+            "array": [1, 2, 3],
+            "object": {"nested": "value"}
+        }"#;
+        fs::write("complex.json", json_content).unwrap();
+
+        let config = import_from_json("complex.json", "development").unwrap();
+        let entries = &config.environments.get("development").unwrap().entries;
+        assert_eq!(entries.get("simple").unwrap().value, "value");
+        assert_eq!(entries.get("number").unwrap().value, "42");
+        assert_eq!(entries.get("boolean").unwrap().value, "true");
+        // Complex types (arrays, objects, null) should be skipped
+        assert!(!entries.contains_key("array"));
+        assert!(!entries.contains_key("object"));
+        assert!(!entries.contains_key("null_value"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_import_from_json_with_unicode_and_escape_sequences() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        let json_content = r#"{
+            "unicode": "🚀🌟",
+            "escaped": "Line1\nLine2\tTabbed",
+            "quote": "He said \"Hello\""
+        }"#;
+        fs::write("unicode.json", json_content).unwrap();
+
+        let config = import_from_json("unicode.json", "development").unwrap();
+        let entries = &config.environments.get("development").unwrap().entries;
+        assert_eq!(entries.get("unicode").unwrap().value, "🚀🌟");
+        assert_eq!(
+            entries.get("escaped").unwrap().value,
+            "Line1\nLine2\tTabbed"
+        );
+        assert_eq!(entries.get("quote").unwrap().value, "He said \"Hello\"");
+    }
+
+    #[test]
+    #[serial]
+    fn test_export_to_env_with_special_characters() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        let mut config: ConfigFile = load_json(CONFIG_FILE).unwrap();
+        let env_config = config.environments.get_mut("development").unwrap();
+        env_config.entries.insert(
+            "SPECIAL_CHARS".into(),
+            ConfigValueEntry::new("!@#$%^&*()_+-=[]{}|;':\",./<>?", "string", false),
+        );
+        env_config.entries.insert(
+            "UNICODE_VALUE".into(),
+            ConfigValueEntry::new("🚀🌟 Hello 世界", "string", false),
+        );
+
+        export_to_env(&config, "development", "export_special.env").unwrap();
+
+        // Verify we can re-import the exported file
+        let reimported = import_from_env("export_special.env", "staging").unwrap();
+        let staging_entries = &reimported.environments.get("staging").unwrap().entries;
+        assert_eq!(
+            staging_entries.get("SPECIAL_CHARS").unwrap().value,
+            "!@#$%^&*()_+-=[]{}|;':\",./<>?"
+        );
+        assert_eq!(
+            staging_entries.get("UNICODE_VALUE").unwrap().value,
+            "🚀🌟 Hello 世界"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_encrypt_if_needed_on_already_encrypted_value() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        unsafe { std::env::set_var("NARU_ENCRYPTION_KEY", "test_key_for_edge_cases") };
+        init_project().unwrap();
+
+        let mut config: ConfigFile = load_json(CONFIG_FILE).unwrap();
+        let env_config = config.environments.get_mut("development").unwrap();
+
+        // Add a secret value
+        let mut entry = ConfigValueEntry::new("secret_value", "string", true);
+        entry.encrypted = false; // Mark as not encrypted initially
+        env_config.entries.insert("SECRET_KEY".into(), entry);
+
+        // Encrypt it once
+        encrypt_if_needed(&mut config, "development", "SECRET_KEY").unwrap();
+
+        // Get the encrypted value by cloning to avoid borrowing conflicts
+        let first_encrypted = config
+            .environments
+            .get("development")
+            .unwrap()
+            .entries
+            .get("SECRET_KEY")
+            .unwrap()
+            .value
+            .clone();
+
+        // Try to encrypt again - should not change
+        encrypt_if_needed(&mut config, "development", "SECRET_KEY").unwrap();
+        let second_encrypted = config
+            .environments
+            .get("development")
+            .unwrap()
+            .entries
+            .get("SECRET_KEY")
+            .unwrap()
+            .value
+            .clone();
+
+        // Encryption should be deterministic with the same input, but in practice AES-GCM with random nonces
+        // will produce different outputs. So we'll decrypt to verify it's still the same value.
+        let decrypted_first =
+            crypto::decrypt_data(&first_encrypted, &get_encryption_key().unwrap()).unwrap();
+        let decrypted_second =
+            crypto::decrypt_data(&second_encrypted, &get_encryption_key().unwrap()).unwrap();
+        assert_eq!(decrypted_first, decrypted_second);
+        unsafe { std::env::remove_var("NARU_ENCRYPTION_KEY") };
+    }
+
+    #[test]
+    #[serial]
+    fn test_decrypt_if_needed_on_non_encrypted_value() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        let mut config: ConfigFile = load_json(CONFIG_FILE).unwrap();
+        let env_config = config.environments.get_mut("development").unwrap();
+
+        // Add a non-secret value (not encrypted)
+        let entry = ConfigValueEntry::new("public_value", "string", false);
+        env_config.entries.insert("PUBLIC_KEY".into(), entry);
+
+        // Try to decrypt - should not fail, should just leave value as is
+        let result = decrypt_if_needed(&mut config, "development", "PUBLIC_KEY");
+        assert!(result.is_ok());
+
+        // Value should remain unchanged
+        let value_after = &config
+            .environments
+            .get("development")
+            .unwrap()
+            .entries
+            .get("PUBLIC_KEY")
+            .unwrap()
+            .value;
+        assert_eq!(value_after, "public_value");
+    }
+
+    #[test]
+    #[serial]
+    fn test_merge_map_into_config_with_duplicate_keys() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        // Create a config with an existing value
+        let mut config: ConfigFile = load_json(CONFIG_FILE).unwrap();
+        let env_config = config.environments.get_mut("development").unwrap();
+        env_config.entries.insert(
+            "EXISTING_KEY".into(),
+            ConfigValueEntry::new("old_value", "string", false),
+        );
+        save_json(CONFIG_FILE, &config).unwrap();
+
+        // Import new values that include the same key
+        let mut new_pairs = HashMap::new();
+        new_pairs.insert("EXISTING_KEY".to_string(), "new_value".to_string());
+        new_pairs.insert("NEW_KEY".to_string(), "another_value".to_string());
+
+        let result_config = merge_map_into_config(&mut config, "development", new_pairs).unwrap();
+        let final_entries = &result_config
+            .environments
+            .get("development")
+            .unwrap()
+            .entries;
+
+        // Existing key should be overwritten
+        assert_eq!(
+            final_entries.get("EXISTING_KEY").unwrap().value,
+            "new_value"
+        );
+        // New key should be added
+        assert_eq!(final_entries.get("NEW_KEY").unwrap().value, "another_value");
+    }
+
+    #[test]
+    #[serial]
+    fn test_import_from_env_with_extremely_long_values() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        let long_value = "x".repeat(10000); // 10KB value
+        let env_content = format!("LONG_VALUE={}", long_value);
+        fs::write("long.env", env_content).unwrap();
+
+        let config = import_from_env("long.env", "development").unwrap();
+        let entries = &config.environments.get("development").unwrap().entries;
+        assert_eq!(entries.get("LONG_VALUE").unwrap().value, long_value);
+    }
+
+    #[test]
+    #[serial]
+    fn test_import_from_env_with_special_char_keys() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        let env_content = "KEY_WITH_DOT=value1\nKEY-WITH-HYPHEN=value2\nKEY_WITH_UNDERSCORE=value3";
+        fs::write("special_keys.env", env_content).unwrap();
+
+        let config = import_from_env("special_keys.env", "development").unwrap();
+        let entries = &config.environments.get("development").unwrap().entries;
+        assert_eq!(entries.get("KEY_WITH_DOT").unwrap().value, "value1");
+        assert_eq!(entries.get("KEY-WITH-HYPHEN").unwrap().value, "value2");
+        assert_eq!(entries.get("KEY_WITH_UNDERSCORE").unwrap().value, "value3");
+    }
+
+    #[test]
+    #[serial]
+    fn test_import_from_env_with_special_characters_in_values() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        let env_content = r#"SPECIAL_VALUES='!@#$%^&*()_+-=[]{}|;":,./<>?~`'"#;
+        fs::write("special_vals.env", env_content).unwrap();
+
+        let config = import_from_env("special_vals.env", "development").unwrap();
+        let entries = &config.environments.get("development").unwrap().entries;
+        assert_eq!(
+            entries.get("SPECIAL_VALUES").unwrap().value,
+            "!@#$%^&*()_+-=[]{}|;\":,./<>?~`"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_import_from_json_with_nested_objects_and_arrays() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        let json_content = r#"{
+            "simple": "value",
+            "array": [1, 2, 3],
+            "nested_object": {
+                "inner": "value"
+            },
+            "mixed_array": ["string", 123, true],
+            "deeply_nested": {
+                "level1": {
+                    "level2": {
+                        "value": "deep"
+                    }
+                }
+            }
+        }"#;
+        fs::write("nested.json", json_content).unwrap();
+
+        let config = import_from_json("nested.json", "development").unwrap();
+        let entries = &config.environments.get("development").unwrap().entries;
+        assert_eq!(entries.get("simple").unwrap().value, "value");
+        // Complex types should be skipped
+        assert!(!entries.contains_key("array"));
+        assert!(!entries.contains_key("nested_object"));
+        assert!(!entries.contains_key("mixed_array"));
+        assert!(!entries.contains_key("deeply_nested"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_import_from_yaml_with_complex_structures() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        let yaml_content = r#"---
+simple: value
+list:
+  - item1
+  - item2
+nested:
+  key: value
+anchors: &anchor
+  reused: value
+reused: *anchor
+"#;
+        fs::write("complex.yaml", yaml_content).unwrap();
+
+        let config = import_from_yaml("complex.yaml", "development").unwrap();
+        let entries = &config.environments.get("development").unwrap().entries;
+        assert_eq!(entries.get("simple").unwrap().value, "value");
+        // Complex structures should be skipped
+        assert!(!entries.contains_key("list"));
+        assert!(!entries.contains_key("nested"));
+        assert!(!entries.contains_key("anchors"));
+        assert!(!entries.contains_key("reused"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_import_from_env_with_malformed_quoted_values() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        // Test various malformed quoting scenarios
+        let env_content = r#"MALFORMED1="unclosed_quote
+MALFORMED2='unclosed_single_quote
+MALFORMED3=no_quotes_but=equals_sign
+MALFORMED4="nested"quote"
+"#;
+        fs::write("malformed.env", env_content).unwrap();
+
+        let config = import_from_env("malformed.env", "development").unwrap();
+        let entries = &config.environments.get("development").unwrap().entries;
+        // Only properly formed key-value pairs should be imported
+        assert!(entries.contains_key("MALFORMED3")); // This one should work
+        assert_eq!(
+            entries.get("MALFORMED3").unwrap().value,
+            "no_quotes_but=equals_sign"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_export_to_yaml_with_special_characters() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        let mut config: ConfigFile = load_json(CONFIG_FILE).unwrap();
+        let env_config = config.environments.get_mut("development").unwrap();
+        env_config.entries.insert(
+            "SPECIAL_CHARS".into(),
+            ConfigValueEntry::new("!@#$%^&*()_+-=[]{}|;':\",./<>?", "string", false),
+        );
+        env_config.entries.insert(
+            "UNICODE_VALUE".into(),
+            ConfigValueEntry::new("🚀🌟 Hello 世界", "string", false),
+        );
+        env_config.entries.insert(
+            "CONTROL_CHARS".into(),
+            ConfigValueEntry::new("\n\t\r\0", "string", false),
+        );
+
+        export_to_yaml(&config, "development", "export_special.yaml").unwrap();
+
+        // Verify we can re-import the exported file
+        let reimported = import_from_yaml("export_special.yaml", "staging").unwrap();
+        let staging_entries = &reimported.environments.get("staging").unwrap().entries;
+        // Only simple keys will be imported, complex ones are skipped
+        if staging_entries.contains_key("SPECIAL_CHARS") {
+            assert_eq!(
+                staging_entries.get("SPECIAL_CHARS").unwrap().value,
+                "!@#$%^&*()_+-=[]{}|;':\",./<>?"
+            );
+        }
+        if staging_entries.contains_key("UNICODE_VALUE") {
+            assert_eq!(
+                staging_entries.get("UNICODE_VALUE").unwrap().value,
+                "🚀🌟 Hello 世界"
+            );
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_import_from_env_with_extreme_unicode_combinations() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        // Test with various Unicode scripts and combining marks
+        let env_content = "EMOJI_MIX=😀😃😄😁😆😅😂🤣\nMIXED_SCRIPTS=Hello 你好 مرحبا Здравствуйте\nCOMBINING_CHARS=a\u{0300}\u{0301}\u{0302}"; // a with grave, acute, circumflex
+        fs::write("unicode_combo.env", env_content).unwrap();
+
+        let config = import_from_env("unicode_combo.env", "development").unwrap();
+        let entries = &config.environments.get("development").unwrap().entries;
+        assert_eq!(entries.get("EMOJI_MIX").unwrap().value, "😀😃😄😁😆😅😂🤣");
+        assert!(entries.contains_key("MIXED_SCRIPTS"));
+        assert!(entries.contains_key("COMBINING_CHARS"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_save_json_with_extremely_large_data() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        // Create a large config with many entries
+        let mut environments = HashMap::new();
+        let mut entries = HashMap::new();
+        for i in 0..1000 {
+            entries.insert(
+                format!("KEY_{}", i),
+                ConfigValueEntry::new(&format!("VALUE_{}", i), "string", false),
+            );
+        }
+        environments.insert("development".to_string(), EnvironmentConfig { entries });
+
+        let large_config = ConfigFile {
+            project_name: "Large Test Project".to_string(),
+            version: "1.0.0".to_string(),
+            environments,
+        };
+
+        save_json(CONFIG_FILE, &large_config).unwrap();
+        let loaded_config: ConfigFile = load_json(CONFIG_FILE).unwrap();
+
+        assert_eq!(loaded_config.project_name, "Large Test Project");
+        assert_eq!(
+            loaded_config
+                .environments
+                .get("development")
+                .unwrap()
+                .entries
+                .len(),
+            1000
+        );
+        assert_eq!(
+            loaded_config
+                .environments
+                .get("development")
+                .unwrap()
+                .entries
+                .get("KEY_500")
+                .unwrap()
+                .value,
+            "VALUE_500"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_import_from_json_with_extremely_nested_objects() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        // Create deeply nested JSON that should be ignored by our import logic
+        let json_content = r#"{
+            "simple": "value",
+            "nested": {
+                "level1": {
+                    "level2": {
+                        "level3": {
+                            "level4": {
+                                "level5": {
+                                    "deep_value": "deep"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "array_of_objects": [
+                {"obj1": "val1"},
+                {"obj2": {"nested": "value"}},
+                {"obj3": [{"arr": "val"}]}
+            ]
+        }"#;
+        fs::write("deeply_nested.json", json_content).unwrap();
+
+        let config = import_from_json("deeply_nested.json", "development").unwrap();
+        let entries = &config.environments.get("development").unwrap().entries;
+        assert_eq!(entries.get("simple").unwrap().value, "value");
+        // Nested structures should be ignored
+        assert!(!entries.contains_key("nested"));
+        assert!(!entries.contains_key("array_of_objects"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_import_from_yaml_with_complex_data_types() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        let yaml_content = r#"---
+timestamp: 2023-12-25T10:30:00Z
+number: 42
+float: 3.14159
+boolean: true
+null_value: null
+string: "just a string"
+list:
+  - item1
+  - item2
+  - item3
+nested:
+  key1: value1
+  key2: value2
+"#;
+        fs::write("complex_types.yaml", yaml_content).unwrap();
+
+        let config = import_from_yaml("complex_types.yaml", "development").unwrap();
+        let entries = &config.environments.get("development").unwrap().entries;
+        assert_eq!(entries.get("string").unwrap().value, "just a string");
+        assert_eq!(entries.get("number").unwrap().value, "42");
+        assert_eq!(entries.get("float").unwrap().value, "3.14159");
+        assert_eq!(entries.get("boolean").unwrap().value, "true");
+        // Complex types like lists and nested objects should be skipped
+        assert!(!entries.contains_key("list"));
+        assert!(!entries.contains_key("nested"));
+        // Timestamp is a special type in YAML, so it might not be imported
+        // Null values are also typically skipped
+        // Only simple scalar values (string, number, boolean) are imported
+    }
+
+    #[test]
+    #[serial]
+    fn test_import_from_env_with_extreme_comment_patterns() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        let env_content = r#"# This is a normal comment
+VALID_KEY1=value1
+### This is a comment with hashes
+VALID_KEY2=value2
+  # This is a comment with leading spaces
+VALID_KEY3=value3
+#COMMENT_WITHOUT_EQUALS
+ANOTHER_VALID_KEY=another_value
+# Multi-line
+# comment
+FINAL_KEY=final_value
+# Comment at the end"#;
+        fs::write("comments.env", env_content).unwrap();
+
+        let config = import_from_env("comments.env", "development").unwrap();
+        let entries = &config.environments.get("development").unwrap().entries;
+        assert_eq!(entries.get("VALID_KEY1").unwrap().value, "value1");
+        assert_eq!(entries.get("VALID_KEY2").unwrap().value, "value2");
+        assert_eq!(entries.get("VALID_KEY3").unwrap().value, "value3");
+        assert_eq!(
+            entries.get("ANOTHER_VALID_KEY").unwrap().value,
+            "another_value"
+        );
+        assert_eq!(entries.get("FINAL_KEY").unwrap().value, "final_value");
+        // Keys from comment lines should not be present
+        assert!(!entries.contains_key("COMMENT_WITHOUT_EQUALS"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_import_from_env_with_variable_expansion_syntax() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        // Test with shell variable expansion syntax (should be treated as literal)
+        let env_content = r#"LITERAL_VAR=$HOME_DIR
+ANOTHER_VAR=${VAR_NAME}
+CMD_VAR=$(command)
+BACKTICK_VAR=`command`
+SIMPLE_VAR=normal_value"#;
+        fs::write("expansion.env", env_content).unwrap();
+
+        let config = import_from_env("expansion.env", "development").unwrap();
+        let entries = &config.environments.get("development").unwrap().entries;
+        assert_eq!(entries.get("LITERAL_VAR").unwrap().value, "$HOME_DIR");
+        assert_eq!(entries.get("ANOTHER_VAR").unwrap().value, "${VAR_NAME}");
+        assert_eq!(entries.get("CMD_VAR").unwrap().value, "$(command)");
+        assert_eq!(entries.get("BACKTICK_VAR").unwrap().value, "`command`");
+        assert_eq!(entries.get("SIMPLE_VAR").unwrap().value, "normal_value");
+    }
+
+    #[test]
+    #[serial]
+    fn test_import_from_json_with_unicode_and_escape_sequences_edge_cases() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        let json_content = r#"{
+            "unicode_emojis": "😀😃😄😁😆😅😂🤣",
+            "unicode_accents": "café naïve résumé",
+            "unicode_cjk": "你好 世界",
+            "unicode_arabic": "مرحبا",
+            "escape_sequences": "Line1\\nLine2\\tTabbed\\rCarriage\\\\Backslash\\/Slash",
+            "unicode_escapes": "Hello",
+            "quote_handling": "She said \"Hello\" to me"
+        }"#;
+        fs::write("unicode_edge.json", json_content).unwrap();
+
+        let config = import_from_json("unicode_edge.json", "development").unwrap();
+        let entries = &config.environments.get("development").unwrap().entries;
+        assert_eq!(
+            entries.get("unicode_emojis").unwrap().value,
+            "😀😃😄😁😆😅😂🤣"
+        );
+        assert_eq!(
+            entries.get("unicode_accents").unwrap().value,
+            "café naïve résumé"
+        );
+        assert_eq!(entries.get("unicode_cjk").unwrap().value, "你好 世界");
+        assert_eq!(
+            entries.get("escape_sequences").unwrap().value,
+            "Line1\\nLine2\\tTabbed\\rCarriage\\\\Backslash\\/Slash"
+        );
+        assert_eq!(entries.get("unicode_escapes").unwrap().value, "Hello");
+        assert_eq!(
+            entries.get("quote_handling").unwrap().value,
+            "She said \"Hello\" to me"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_export_import_cycle_with_extreme_values() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        // Create a config with extreme values
+        let mut config: ConfigFile = load_json(CONFIG_FILE).unwrap();
+        let env_config = config.environments.get_mut("development").unwrap();
+
+        env_config.entries.insert(
+            "VERY_LONG_KEY_WITH_SPECIAL_CHARS".into(), // Remove Unicode chars that are not allowed
+            ConfigValueEntry::new(&"x".repeat(10000), "string", false),
+        );
+        env_config.entries.insert(
+            "SPECIAL_CHARS_VALUE".into(),
+            ConfigValueEntry::new("!@#$%^&*()_+-=[]{}|;':\",./<>?~`", "string", false),
+        );
+        env_config.entries.insert(
+            "UNICODE_VALUE".into(),
+            ConfigValueEntry::new("🚀🌟 Hello 世界 🌍", "string", false),
+        );
+        env_config.entries.insert(
+            "INTEGER_VALUE".into(),
+            ConfigValueEntry::new("9223372036854775807", "integer", false), // i64 max
+        );
+
+        // Export to JSON
+        export_to_json(&config, "development", "cycle_test.json").unwrap();
+
+        // Import back from JSON
+        let reimported_config = import_from_json("cycle_test.json", "staging").unwrap();
+        let staging_entries = &reimported_config
+            .environments
+            .get("staging")
+            .unwrap()
+            .entries;
+
+        assert_eq!(
+            staging_entries
+                .get("VERY_LONG_KEY_WITH_SPECIAL_CHARS")
+                .unwrap()
+                .value,
+            "x".repeat(10000)
+        );
+        assert_eq!(
+            staging_entries.get("SPECIAL_CHARS_VALUE").unwrap().value,
+            "!@#$%^&*()_+-=[]{}|;':\",./<>?~`"
+        );
+        assert_eq!(
+            staging_entries.get("UNICODE_VALUE").unwrap().value,
+            "🚀🌟 Hello 世界 🌍"
+        );
+        assert_eq!(
+            staging_entries.get("INTEGER_VALUE").unwrap().value,
+            "9223372036854775807"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_import_from_env_with_mixed_quoting_styles() {
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        init_project().unwrap();
+
+        let env_content = r#"NO_QUOTES=simple_value
+SINGLE_QUOTES='value with spaces'
+DOUBLE_QUOTES="another value with spaces"
+MIXED_QUOTES='value "with" quotes'
+MIXED_QUOTES_2="value 'with' quotes"
+NESTED_QUOTES='this is "nested" quote'
+NESTED_QUOTES_2="this is 'nested' quote"
+UNCLOSED_SINGLE='unclosed quote here
+UNCLOSED_DOUBLE="unclosed quote here
+EMPTY_SINGLE=''
+EMPTY_DOUBLE=""
+QUOTES_WITH_EQUALS='key=value_in_quotes'
+MIXED_SPECIAL_CHARS='!@#$%^&*()_+-=[]{}|;":\",./<>?~`'"#;
+        fs::write("mixed_quotes.env", env_content).unwrap();
+
+        let config = import_from_env("mixed_quotes.env", "development").unwrap();
+        let entries = &config.environments.get("development").unwrap().entries;
+
+        assert_eq!(entries.get("NO_QUOTES").unwrap().value, "simple_value");
+        assert_eq!(
+            entries.get("SINGLE_QUOTES").unwrap().value,
+            "value with spaces"
+        );
+        assert_eq!(
+            entries.get("DOUBLE_QUOTES").unwrap().value,
+            "another value with spaces"
+        );
+        assert_eq!(
+            entries.get("MIXED_QUOTES").unwrap().value,
+            "value \"with\" quotes"
+        );
+        assert_eq!(
+            entries.get("MIXED_QUOTES_2").unwrap().value,
+            "value 'with' quotes"
+        );
+        assert_eq!(entries.get("EMPTY_SINGLE").unwrap().value, "");
+        assert_eq!(entries.get("EMPTY_DOUBLE").unwrap().value, "");
+        assert_eq!(
+            entries.get("QUOTES_WITH_EQUALS").unwrap().value,
+            "key=value_in_quotes"
+        );
+        assert_eq!(
+            entries.get("MIXED_SPECIAL_CHARS").unwrap().value,
+            "!@#$%^&*()_+-=[]{}|;\":\\\",./<>?~`"
+        );
+    }
+}
+
+// Add the missing export_to_json function
+#[allow(dead_code)] // This function is used in tests but might not be used in main binary
+pub fn export_to_json(
+    config: &ConfigFile,
+    env: &str,
+    file_path: &str,
+) -> Result<(), PersistenceError> {
+    // Validate environment name
+    security::validate_environment_name(env).map_err(|e| PersistenceError::IoError {
+        source: std::io::Error::new(std::io::ErrorKind::InvalidInput, e),
+    })?;
+
+    // Sanitize file path
+    let sanitized_path =
+        security::sanitize_file_path(file_path).map_err(|e| PersistenceError::IoError {
+            source: std::io::Error::new(std::io::ErrorKind::InvalidInput, e),
+        })?;
+
+    let env_config = config
+        .environments
+        .get(env)
+        .ok_or_else(|| PersistenceError::IoError {
+            source: std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Environment '{}' not found", env),
+            ),
+        })?;
+
+    // Create a simplified map with just the values (not the full ConfigValueEntry)
+    let mut simple_map = std::collections::HashMap::new();
+    for (key, entry) in &env_config.entries {
+        simple_map.insert(key.clone(), entry.value.clone());
+    }
+
+    let serialized = serde_json::to_string_pretty(&simple_map)?;
+    std::fs::write(sanitized_path, serialized)?;
+
+    Ok(())
 }

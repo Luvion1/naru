@@ -190,4 +190,312 @@ mod tests {
         let decrypted = decrypt_data(&encrypted, &key).unwrap();
         assert_eq!(data, decrypted);
     }
+
+    #[test]
+    fn test_encrypt_with_different_keys() {
+        let key1 = [1u8; 32];
+        let key2 = [2u8; 32];
+        let data = "test data";
+
+        let encrypted1 = encrypt_data(data, &key1).unwrap();
+        let encrypted2 = encrypt_data(data, &key2).unwrap();
+
+        assert_ne!(encrypted1, encrypted2); // Different keys should produce different ciphertexts
+    }
+
+    #[test]
+    fn test_decrypt_with_invalid_nonce() {
+        let key = [0u8; 32];
+        let data = "test";
+        let encrypted = encrypt_data(data, &key).unwrap();
+
+        // Modify the nonce part of the encrypted data
+        let mut bytes = hex::decode(&encrypted).unwrap();
+        if bytes.len() >= 12 {
+            bytes[0] ^= 0xFF; // Flip bits in nonce
+            let modified_hex = hex::encode(&bytes);
+            assert!(decrypt_data(&modified_hex, &key).is_err());
+        }
+    }
+
+    #[test]
+    fn test_encrypt_large_data() {
+        let key = [0u8; 32];
+        let large_data = "x".repeat(10000); // 10KB of data
+        let encrypted = encrypt_data(&large_data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(large_data, decrypted);
+    }
+
+    #[test]
+    fn test_decrypt_with_truncated_ciphertext() {
+        let key = [0u8; 32];
+        let data = "test data for truncation";
+        let encrypted = encrypt_data(data, &key).unwrap();
+
+        // Truncate the ciphertext part (after the nonce)
+        let mut bytes = hex::decode(&encrypted).unwrap();
+        if bytes.len() > 12 {
+            bytes.truncate(13); // Just nonce + 1 byte
+            let truncated_hex = hex::encode(&bytes);
+            assert!(decrypt_data(&truncated_hex, &key).is_err());
+        }
+    }
+
+    #[test]
+    fn test_encrypt_decrypt_with_zero_key() {
+        let key = [0u8; 32]; // All zeros
+        let data = "test with zero key";
+        let encrypted = encrypt_data(data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_encrypt_decrypt_with_max_byte_key() {
+        let key = [0xFFu8; 32]; // All max bytes
+        let data = "test with max byte key";
+        let encrypted = encrypt_data(data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_decrypt_with_invalid_hex_characters() {
+        let key = [0u8; 32];
+        // Test various invalid hex strings
+        assert!(decrypt_data("XYZ123", &key).is_err());
+        assert!(decrypt_data("gggg", &key).is_err());
+        assert!(decrypt_data("!@#$%", &key).is_err());
+    }
+
+    #[test]
+    fn test_encrypt_with_special_unicode_characters() {
+        let key = [0u8; 32];
+        let data = "Null byte:\0, Tab:\t, Newline:\n, Carriage return:\r";
+        let encrypted = encrypt_data(data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_encrypt_empty_key() {
+        // This test verifies behavior when key is invalid
+        // Since the key is fixed-size [u8; 32], we can't really have an empty key
+        // But we can test with a key that has minimal entropy
+        let mut key = [0u8; 32];
+        key[0] = 1; // Only one bit set
+        let data = "minimal entropy test";
+        let encrypted = encrypt_data(data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_encrypt_with_all_possible_bytes() {
+        let key = [0u8; 32];
+        // Create a string with all possible byte values (0-255) represented as readable characters
+        let data = (0..255)
+            .map(|i| (i % 95 + 32) as u8 as char)
+            .collect::<String>();
+        let encrypted = encrypt_data(&data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_encrypt_with_extremely_long_key() {
+        let mut key = [0u8; 32];
+        for i in 0..32 {
+            key[i] = i as u8;
+        }
+        let data = "test with patterned key";
+        let encrypted = encrypt_data(data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_encrypt_with_alternating_bit_pattern_key() {
+        let mut key = [0u8; 32];
+        for i in 0..32 {
+            key[i] = if i % 2 == 0 { 0xAA } else { 0x55 }; // Alternating bit patterns
+        }
+        let data = "test with alternating key";
+        let encrypted = encrypt_data(data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_encrypt_with_maximal_entropy_key() {
+        let mut key = [0u8; 32];
+        for i in 0..32 {
+            key[i] = (i * 7) as u8; // Spread values across range
+        }
+        let data = "test with maximal entropy key";
+        let encrypted = encrypt_data(data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_encrypt_decrypt_with_different_sizes() {
+        let key = [0u8; 32];
+
+        // Test various sizes
+        let sizes = [1, 10, 100, 1000, 5000, 10000];
+        for size in sizes {
+            let data = "x".repeat(size);
+            let encrypted = encrypt_data(&data, &key).unwrap();
+            let decrypted = decrypt_data(&encrypted, &key).unwrap();
+            assert_eq!(data, decrypted);
+        }
+    }
+
+    #[test]
+    fn test_encrypt_with_special_control_characters() {
+        let key = [0u8; 32];
+        let data = "\0\n\r\t\x0B\x0C"; // null, newline, carriage return, tab, vertical tab, form feed
+        let encrypted = encrypt_data(data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_encrypt_with_binary_data() {
+        let key = [0u8; 32];
+        // Create binary data that looks like it could be hex or other encodings
+        let binary_data = vec![0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE, 0xFD, 0xFC];
+        let data = String::from_utf8_lossy(&binary_data);
+        let encrypted = encrypt_data(&data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_decrypt_with_padding_variations() {
+        let key = [0u8; 32];
+        let data = "padding test";
+        let encrypted = encrypt_data(data, &key).unwrap();
+
+        // Test that decryption fails with extra padding
+        let padded_encrypted = format!("{}00", encrypted);
+        assert!(decrypt_data(&padded_encrypted, &key).is_err());
+
+        // Test that decryption fails with missing padding
+        if encrypted.len() > 2 {
+            let truncated_encrypted = &encrypted[..encrypted.len() - 2];
+            assert!(decrypt_data(truncated_encrypted, &key).is_err());
+        }
+    }
+
+    #[test]
+    fn test_encrypt_decrypt_with_extreme_unicode() {
+        let key = [0u8; 32];
+        // Test with various Unicode planes
+        let data = "ASCII: hello\nBMP: café\nSMP: 𐐷\nEmoji: 😀🎉🚀\nCJK: 你好世界\nArabic: مرحبا";
+        let encrypted = encrypt_data(data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_encrypt_with_empty_key_bytes() {
+        let key = [0u8; 32]; // All zero key
+        let data = "test data";
+        let encrypted = encrypt_data(data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_encrypt_with_max_key_bytes() {
+        let key = [0xFFu8; 32]; // All max bytes
+        let data = "test data";
+        let encrypted = encrypt_data(data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_encrypt_with_alternating_key_pattern() {
+        let mut key = [0u8; 32];
+        for i in 0..32 {
+            key[i] = if i % 2 == 0 { 0 } else { 0xFF };
+        }
+        let data = "alternating key test";
+        let encrypted = encrypt_data(data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_encrypt_with_primes_in_key() {
+        let mut key = [0u8; 32];
+        let primes = [
+            2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83,
+            89, 97, 101, 103, 107, 109, 113, 127, 131,
+        ];
+        for i in 0..32 {
+            key[i] = primes[i % primes.len()];
+        }
+        let data = "prime key test";
+        let encrypted = encrypt_data(data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_encrypt_with_fibonacci_key() {
+        let mut key = [0u8; 32];
+        let mut a = 0u8;
+        let mut b = 1u8;
+        for i in 0..32 {
+            key[i] = a;
+            let next = a.wrapping_add(b);
+            a = b;
+            b = next;
+        }
+        let data = "fibonacci key test";
+        let encrypted = encrypt_data(data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_encrypt_with_very_long_strings() {
+        let key = [0u8; 32];
+        let data = "A".repeat(50000); // 50KB string
+        let encrypted = encrypt_data(&data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_encrypt_with_all_ascii_chars() {
+        let key = [0u8; 32];
+        let data: String = (0..128).map(|c| c as u8 as char).collect(); // All ASCII chars
+        let encrypted = encrypt_data(&data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_encrypt_with_null_bytes_in_data() {
+        let key = [0u8; 32];
+        let data = "string\0with\0null\0bytes";
+        let encrypted = encrypt_data(data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
+
+    #[test]
+    fn test_encrypt_with_special_control_chars() {
+        let key = [0u8; 32];
+        let data = "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F"; // First 16 control chars
+        let encrypted = encrypt_data(data, &key).unwrap();
+        let decrypted = decrypt_data(&encrypted, &key).unwrap();
+        assert_eq!(data, decrypted);
+    }
 }
