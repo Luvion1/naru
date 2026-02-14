@@ -5,6 +5,16 @@ use anyhow::Result;
 
 /// Menambahkan field ke skema
 pub fn add_field(field: FieldDefinition) -> Result<()> {
+    // Validate field type
+    let valid_types = ["string", "integer", "boolean"];
+    if !valid_types.contains(&field.r#type.as_str()) {
+        return Err(anyhow::anyhow!(
+            "Invalid field type '{}'. Valid types are: {}",
+            field.r#type,
+            valid_types.join(", ")
+        ));
+    }
+
     let mut schema: SchemaFile =
         persistence::load_json(SCHEMA_FILE).unwrap_or_else(|_| SchemaFile {
             version: "1.0".to_string(),
@@ -254,12 +264,10 @@ mod tests {
 
         // Verify we can retrieve them all
         for i in 0..100 {
-            assert!(
-                schema
-                    .fields
-                    .iter()
-                    .any(|f| f.key == format!("field_{}", i))
-            );
+            assert!(schema
+                .fields
+                .iter()
+                .any(|f| f.key == format!("field_{}", i)));
         }
     }
 

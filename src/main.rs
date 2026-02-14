@@ -30,6 +30,15 @@ fn main() -> Result<()> {
                 .split_once('=')
                 .ok_or_else(|| anyhow::anyhow!("Invalid format. Use key=value"))?;
 
+            // Validate value length to prevent DoS
+            const MAX_VALUE_LENGTH: usize = 1_000_000; // 1MB limit
+            if value.len() > MAX_VALUE_LENGTH {
+                return Err(anyhow::anyhow!(
+                    "Value too long (max {} bytes)",
+                    MAX_VALUE_LENGTH
+                ));
+            }
+
             // Validate environment name and key
             crate::core::security::validate_environment_name(&env)
                 .map_err(|e| anyhow::anyhow!("Invalid environment name: {}", e))?;
@@ -142,7 +151,12 @@ fn main() -> Result<()> {
                 .get(&key)
                 .ok_or_else(|| anyhow::anyhow!("Key '{}' not found.", key))?;
 
-            println!("{}", entry.value);
+            // Mask secret values to prevent leakage in terminal history/logs
+            if entry.is_secret {
+                println!("********");
+            } else {
+                println!("{}", entry.value);
+            }
         }
         Commands::List { env } => {
             use console::{Emoji, style};
@@ -479,6 +493,21 @@ fn main() -> Result<()> {
                         return Err(anyhow::anyhow!("Environment '{}' not found.", name));
                     }
 
+                    // Add confirmation prompt to prevent accidental deletion
+                    use dialoguer::Confirm;
+                    let confirmed = Confirm::new()
+                        .with_prompt(format!(
+                            "Are you sure you want to remove environment '{}'? This cannot be undone.",
+                            name
+                        ))
+                        .default(false)
+                        .interact()
+                        .map_err(|e| anyhow::anyhow!("Confirmation prompt failed: {}", e))?;
+
+                    if !confirmed {
+                        return Ok(());
+                    }
+
                     persistence::save_json(CONFIG_FILE, &config)?;
 
                     // Audit Log
@@ -515,9 +544,17 @@ fn main() -> Result<()> {
                     let sanitized_path = crate::core::security::sanitize_file_path(&file_path)
                         .map_err(|e| anyhow::anyhow!("Invalid file path: {}", e))?;
 
-                    let config: ConfigFile = persistence::load_json(CONFIG_FILE).map_err(|e| {
+                    let mut config: ConfigFile = persistence::load_json(CONFIG_FILE).map_err(|e| {
                         anyhow::anyhow!("Failed to load config: {}. Run 'naru init' first.", e)
                     })?;
+
+                    // Filter out encrypted secrets from backup for security
+                    for env_config in config.environments.values_mut() {
+                        env_config.entries.retain(|_, entry| {
+                            // Keep if not a secret, or if secret but not encrypted
+                            !entry.is_secret || !entry.encrypted
+                        });
+                    }
 
                     let schema: SchemaFile =
                         persistence::load_json(SCHEMA_FILE).unwrap_or_else(|_| {
@@ -540,11 +577,16 @@ fn main() -> Result<()> {
                         json_data,
                     )?;
                     println!("Backup created successfully at: {}", file_path);
+                    println!("Note: Encrypted secrets have been excluded from backup for security.");
                 }
                 cli::parser::BackupAction::Restore { file_path } => {
                     // Sanitize file path to prevent directory traversal
                     let sanitized_path = crate::core::security::sanitize_file_path(&file_path)
                         .map_err(|e| anyhow::anyhow!("Invalid file path: {}", e))?;
+
+                    // Check file size before reading (max 10MB)
+                    crate::core::security::check_file_size(&sanitized_path, 10 * 1024 * 1024)
+                        .map_err(|e| anyhow::anyhow!("Backup file too large: {}", e))?;
 
                     // Read the backup file
                     let content = std::fs::read_to_string(
@@ -552,7 +594,38 @@ fn main() -> Result<()> {
                             .to_str()
                             .ok_or_else(|| anyhow::anyhow!("Invalid file path"))?,
                     )?;
-                    let backup_data: BackupData = serde_json::from_str(&content)?;
+                    
+                    // Validate backup data before deserializing
+                    if content.len() > 10 * 1024 * 1024 {
+                        return Err(anyhow::anyhow!("Backup file exceeds 10MB limit"));
+                    }
+                    
+                    let backup_data: BackupData = serde_json::from_str(&content)
+                        .map_err(|e| anyhow::anyhow!("Invalid backup file format: {}", e))?;
+
+                    // Validate backup data structure
+                    if backup_data.config.environments.is_empty() {
+                        return Err(anyhow::anyhow!("Backup file has no environments"));
+                    }
+                    for (env_name, env_config) in &backup_data.config.environments {
+                        if env_name.is_empty() {
+                            return Err(anyhow::anyhow!("Backup contains empty environment name"));
+                        }
+                        for (key, entry) in &env_config.entries {
+                            if key.is_empty() {
+                                return Err(anyhow::anyhow!("Backup contains empty key in environment {}", env_name));
+                            }
+                            // Validate value is not too large
+                            if entry.value.len() > 1_000_000 {
+                                return Err(anyhow::anyhow!("Backup contains excessively large value for key {}", key));
+                            }
+                        }
+                    }
+
+                    // Validate schema
+                    if backup_data.schema.version.is_empty() {
+                        return Err(anyhow::anyhow!("Backup has invalid schema version"));
+                    }
 
                     // Save the restored config and schema
                     persistence::save_json(CONFIG_FILE, &backup_data.config)?;
@@ -606,6 +679,14 @@ fn main() -> Result<()> {
             println!("\nDiff between '{}' and '{}':", env1, env2);
             println!("{}", "-".repeat(60));
 
+            let mask_secret = |value: &str, is_secret: bool| -> String {
+                if is_secret {
+                    "********".to_string()
+                } else {
+                    value.to_string()
+                }
+            };
+
             let mut different_values = false;
             let mut only_in_env1 = false;
             let mut only_in_env2 = false;
@@ -616,10 +697,21 @@ fn main() -> Result<()> {
                 if let Some(entry2) = env2_config.entries.get(key)
                     && entry1.value != entry2.value
                 {
-                    println!(
-                        "  ~ {}: {} -> {} ({} type)",
-                        key, entry1.value, entry2.value, entry1.r#type
-                    );
+                    let display_val1 = mask_secret(&entry1.value, entry1.is_secret);
+                    let display_val2 = mask_secret(&entry2.value, entry2.is_secret);
+                    
+                    // Don't show if either is a secret
+                    if !entry1.is_secret && !entry2.is_secret {
+                        println!(
+                            "  ~ {}: {} -> {} ({} type)",
+                            key, display_val1, display_val2, entry1.r#type
+                        );
+                    } else {
+                        println!(
+                            "  ~ {}: [modified] ({} type)",
+                            key, entry1.r#type
+                        );
+                    }
                     different_values = true;
                 }
             }
@@ -627,7 +719,12 @@ fn main() -> Result<()> {
             // Check values only in env1
             for key in env1_config.entries.keys() {
                 if !env2_config.entries.contains_key(key) {
-                    println!("  - {} (only in {})", key, env1);
+                    let is_secret = env1_config.entries.get(key).map(|e| e.is_secret).unwrap_or(false);
+                    if !is_secret {
+                        println!("  - {} (only in {})", key, env1);
+                    } else {
+                        println!("  - {} (only in {}, secret)", key, env1);
+                    }
                     only_in_env1 = true;
                 }
             }
@@ -635,7 +732,12 @@ fn main() -> Result<()> {
             // Check values only in env2
             for key in env2_config.entries.keys() {
                 if !env1_config.entries.contains_key(key) {
-                    println!("  + {} (only in {})", key, env2);
+                    let is_secret = env2_config.entries.get(key).map(|e| e.is_secret).unwrap_or(false);
+                    if !is_secret {
+                        println!("  + {} (only in {})", key, env2);
+                    } else {
+                        println!("  + {} (only in {}, secret)", key, env2);
+                    }
                     only_in_env2 = true;
                 }
             }
@@ -645,7 +747,12 @@ fn main() -> Result<()> {
                 if let Some(entry2) = env2_config.entries.get(key)
                     && entry1.value == entry2.value
                 {
-                    println!("  = {}: {} ({})", key, entry1.value, entry1.r#type);
+                    // Don't show secret values
+                    if !entry1.is_secret {
+                        println!("  = {}: {} ({})", key, entry1.value, entry1.r#type);
+                    } else {
+                        println!("  = {}: [secret] ({})", key, entry1.r#type);
+                    }
                     same_values = true;
                 }
             }
@@ -668,6 +775,10 @@ fn main() -> Result<()> {
             let sanitized_to_file = crate::core::security::sanitize_file_path(&to_file)
                 .map_err(|e| anyhow::anyhow!("Invalid destination file path: {}", e))?;
 
+            // Check source file size before reading (max 10MB)
+            crate::core::security::check_file_size(&sanitized_from_file, 10 * 1024 * 1024)
+                .map_err(|e| anyhow::anyhow!("Source file too large: {}", e))?;
+
             // Determine source format and load config
             let config = match from_format.as_str() {
                 "json" => {
@@ -676,6 +787,10 @@ fn main() -> Result<()> {
                             .to_str()
                             .ok_or_else(|| anyhow::anyhow!("Invalid source file path"))?,
                     )?;
+                    // Limit content size
+                    if content.len() > 10 * 1024 * 1024 {
+                        return Err(anyhow::anyhow!("Source file content exceeds 10MB limit"));
+                    }
                     let format = JsonFormat;
                     format.deserialize(&content)?
                 }
@@ -685,6 +800,9 @@ fn main() -> Result<()> {
                             .to_str()
                             .ok_or_else(|| anyhow::anyhow!("Invalid source file path"))?,
                     )?;
+                    if content.len() > 10 * 1024 * 1024 {
+                        return Err(anyhow::anyhow!("Source file content exceeds 10MB limit"));
+                    }
                     let format = TomlFormat;
                     format.deserialize(&content)?
                 }
@@ -694,6 +812,9 @@ fn main() -> Result<()> {
                             .to_str()
                             .ok_or_else(|| anyhow::anyhow!("Invalid source file path"))?,
                     )?;
+                    if content.len() > 10 * 1024 * 1024 {
+                        return Err(anyhow::anyhow!("Source file content exceeds 10MB limit"));
+                    }
                     let format = PropertiesFormat;
                     format.deserialize(&content)?
                 }
@@ -703,6 +824,9 @@ fn main() -> Result<()> {
                             .to_str()
                             .ok_or_else(|| anyhow::anyhow!("Invalid source file path"))?,
                     )?;
+                    if content.len() > 10 * 1024 * 1024 {
+                        return Err(anyhow::anyhow!("Source file content exceeds 10MB limit"));
+                    }
                     serde_yaml::from_str(&content)?
                 }
                 _ => {
@@ -774,6 +898,15 @@ fn main() -> Result<()> {
             if key_str.len() < 32 {
                 return Err(anyhow::anyhow!(
                     "Encryption key must be at least 32 characters long"
+                ));
+            }
+
+            // Check key entropy - require minimum unique characters
+            let unique_chars: std::collections::HashSet<char> = key_str.chars().collect();
+            let unique_ratio = unique_chars.len() as f64 / key_str.len() as f64;
+            if unique_ratio < 0.5 {
+                return Err(anyhow::anyhow!(
+                    "Encryption key has low entropy (too many repeated characters). Use a stronger key with more variety."
                 ));
             }
 

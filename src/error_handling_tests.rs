@@ -1,13 +1,13 @@
 #[cfg(test)]
 mod error_handling_tests {
     use crate::core::crypto;
+    use crate::core::models::*;
     use crate::core::persistence;
     use crate::core::security;
-    use crate::core::models::*;
+    use serial_test::serial;
     use std::collections::HashMap;
     use std::fs;
     use tempfile::TempDir;
-    use serial_test::serial;
 
     /// Test error handling in crypto module with invalid inputs
     #[test]
@@ -78,7 +78,7 @@ mod error_handling_tests {
         let temp_dir = TempDir::new().unwrap();
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(temp_dir.path()).unwrap();
-        
+
         // Clean up function
         let cleanup = || {
             let _ = std::env::set_current_dir(original_dir);
@@ -93,8 +93,9 @@ mod error_handling_tests {
             project_name: "Test".to_string(),
             version: "1.0".to_string(),
             environments: HashMap::new(),
+            salt: None,
         };
-        
+
         // Try to save to a path that traverses up
         let result = persistence::save_json("../forbidden.json", &config);
         assert!(result.is_err());
@@ -179,7 +180,7 @@ mod error_handling_tests {
         let temp_dir = TempDir::new().unwrap();
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(temp_dir.path()).unwrap();
-        
+
         // Clean up function
         let cleanup = || {
             let _ = std::env::set_current_dir(original_dir);
@@ -191,7 +192,7 @@ mod error_handling_tests {
         // Create a config with an extremely large number of entries to test resource limits
         let mut environments = HashMap::new();
         let mut entries = HashMap::new();
-        
+
         // Add many entries to test memory limits
         for i in 0..10000 {
             entries.insert(
@@ -199,13 +200,14 @@ mod error_handling_tests {
                 ConfigValueEntry::new(&format!("VALUE_{}", i), "string", false),
             );
         }
-        
+
         environments.insert("development".to_string(), EnvironmentConfig { entries });
 
         let large_config = ConfigFile {
             project_name: "Resource Test".to_string(),
             version: "1.0.0".to_string(),
             environments,
+            salt: None,
         };
 
         // This should work but test the limits
@@ -225,7 +227,7 @@ mod error_handling_tests {
         let temp_dir = TempDir::new().unwrap();
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(temp_dir.path()).unwrap();
-        
+
         // Clean up function
         let cleanup = || {
             let _ = std::env::set_current_dir(original_dir);
@@ -236,7 +238,7 @@ mod error_handling_tests {
 
         // Attempt to set a value with an invalid environment name
         let mut config: ConfigFile = persistence::load_json("config.json").unwrap();
-        
+
         // Try to access a non-existent environment
         assert!(config.environments.get("non_existent_env").is_none());
 
@@ -246,13 +248,13 @@ mod error_handling_tests {
 
 #[cfg(test)]
 mod concurrency_tests {
-    use crate::core::persistence;
     use crate::core::models::*;
+    use crate::core::persistence;
+    use serial_test::serial;
     use std::collections::HashMap;
     use std::sync::{Arc, Barrier};
     use std::thread;
     use tempfile::TempDir;
-    use serial_test::serial;
 
     /// Test concurrent access to the same configuration file
     #[test]
@@ -287,7 +289,11 @@ mod concurrency_tests {
                             if let Some(dev_env) = config.environments.get_mut("development") {
                                 dev_env.entries.insert(
                                     format!("thread_{}_key", i),
-                                    ConfigValueEntry::new(&format!("thread_{}_value", i), "string", false),
+                                    ConfigValueEntry::new(
+                                        &format!("thread_{}_value", i),
+                                        "string",
+                                        false,
+                                    ),
                                 );
                             }
 
@@ -305,7 +311,10 @@ mod concurrency_tests {
         let results: Vec<bool> = handles.into_iter().map(|h| h.join().unwrap()).collect();
 
         // Check that at least some operations succeeded
-        assert!(results.iter().any(|&x| x), "At least some concurrent operations should succeed");
+        assert!(
+            results.iter().any(|&x| x),
+            "At least some concurrent operations should succeed"
+        );
 
         cleanup();
     }
@@ -363,12 +372,18 @@ mod concurrency_tests {
         let results: Vec<bool> = handles.into_iter().map(|h| h.join().unwrap()).collect();
 
         // Check that all operations succeeded
-        assert!(results.iter().all(|&x| x), "All concurrent audit operations should succeed");
+        assert!(
+            results.iter().all(|&x| x),
+            "All concurrent audit operations should succeed"
+        );
 
         // Verify the integrity of the audit log
         let integrity_check = audit::AuditLogEntry::verify_log_integrity(&log_path);
         assert!(integrity_check.is_ok());
-        assert!(integrity_check.unwrap(), "Audit log should maintain integrity under concurrent writes");
+        assert!(
+            integrity_check.unwrap(),
+            "Audit log should maintain integrity under concurrent writes"
+        );
 
         cleanup();
     }
@@ -413,7 +428,10 @@ mod concurrency_tests {
         let results: Vec<bool> = handles.into_iter().map(|h| h.join().unwrap()).collect();
 
         // Check that all operations succeeded
-        assert!(results.iter().all(|&x| x), "All concurrent crypto operations should succeed");
+        assert!(
+            results.iter().all(|&x| x),
+            "All concurrent crypto operations should succeed"
+        );
     }
 
     /// Test concurrent file I/O operations with different files
@@ -455,6 +473,7 @@ mod concurrency_tests {
                         project_name: format!("Test_Project_{}", i),
                         version: "1.0.0".to_string(),
                         environments,
+                        salt: None,
                     };
 
                     let filename = format!("config_{}.json", i);
@@ -476,7 +495,10 @@ mod concurrency_tests {
         let results: Vec<bool> = handles.into_iter().map(|h| h.join().unwrap()).collect();
 
         // Check that all operations succeeded
-        assert!(results.iter().all(|&x| x), "All concurrent file operations should succeed");
+        assert!(
+            results.iter().all(|&x| x),
+            "All concurrent file operations should succeed"
+        );
 
         cleanup();
     }

@@ -94,6 +94,7 @@ impl ConfigFormat for PropertiesFormat {
             project_name: "Imported Project".to_string(),
             version: "1.0.0".to_string(),
             environments,
+            salt: None, // Will be set when saving to actual config
         })
     }
 }

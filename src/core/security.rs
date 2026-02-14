@@ -38,6 +38,51 @@ pub fn sanitize_file_path(path: &str) -> Result<PathBuf, &'static str> {
     Ok(normalized)
 }
 
+/// Check if a path is a symlink (to prevent symlink attacks)
+pub fn is_symlink(path: &Path) -> bool {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta.file_type().is_symlink(),
+        Err(_) => false,
+    }
+}
+
+/// Resolve symlink and check if it points outside allowed directory
+pub fn resolve_and_validate_path(path: &Path, base_dir: &Path) -> Result<PathBuf, &'static str> {
+    // First check if it's a symlink
+    if is_symlink(path) {
+        // Resolve the symlink
+        let resolved = std::fs::read_link(path).map_err(|_| "Cannot resolve symlink")?;
+
+        // Check if resolved path is outside base directory
+        let resolved_abs = if resolved.is_absolute() {
+            resolved
+        } else {
+            // Make it absolute relative to the parent directory of the original path
+            if let Some(parent) = path.parent() {
+                parent.join(&resolved)
+            } else {
+                resolved
+            }
+        };
+
+        // Normalize and check if it's within base_dir
+        let canonical_base =
+            std::fs::canonicalize(base_dir).map_err(|_| "Cannot access base directory")?;
+        let canonical_resolved =
+            std::fs::canonicalize(&resolved_abs).map_err(|_| "Cannot resolve symlink target")?;
+
+        // Check if resolved path starts with base directory
+        if !canonical_resolved.starts_with(&canonical_base) {
+            return Err("Symlink points outside allowed directory");
+        }
+
+        return Ok(canonical_resolved);
+    }
+
+    // Not a symlink, just return canonicalized path
+    std::fs::canonicalize(path).map_err(|_| "Cannot access path")
+}
+
 /// Normalize path by resolving "." and ".." components
 fn normalize_path(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
@@ -346,8 +391,8 @@ mod tests {
         assert!(validate_config_key("key_Здравствуйте").is_ok()); // Cyrillic (alphanumeric in Rust)
         assert!(validate_config_key("key_🚀").is_err()); // Emoji (not alphanumeric)
         assert!(validate_config_key("key_café_naïve").is_ok()); // Accented Latin characters
-        // Arabic letters are not considered alphanumeric in Rust's is_alphanumeric
-        // so they should be rejected
+                                                                // Arabic letters are not considered alphanumeric in Rust's is_alphanumeric
+                                                                // so they should be rejected
     }
 
     #[test]
@@ -422,7 +467,7 @@ mod tests {
             "value\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F";
         let sanitized = sanitize_string_value(input_with_controls);
         assert!(!sanitized.contains('\0')); // Null byte should be removed
-        // Other control characters should remain
+                                            // Other control characters should remain
         assert!(sanitized.contains('\x01'));
         assert!(sanitized.contains('\x02'));
         assert!(sanitized.contains('\t')); // Tab should remain
@@ -571,7 +616,7 @@ mod tests {
         let input_with_controls = "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1A\x1B\x1C\x1D\x1E\x1F";
         let sanitized = sanitize_string_value(input_with_controls);
         assert!(!sanitized.contains('\0')); // Null byte should be removed
-        // Other control characters should remain
+                                            // Other control characters should remain
         assert_eq!(sanitized.chars().count(), 31); // All except null byte
     }
 

@@ -5,6 +5,8 @@ use std::fs::{self, OpenOptions};
 use std::io::{BufRead, Write};
 use std::path::Path;
 
+use crate::core::locking;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AuditLogEntry {
     pub timestamp: DateTime<Utc>,
@@ -20,6 +22,27 @@ pub struct AuditLogEntry {
 }
 
 impl AuditLogEntry {
+    // Sanitize string to prevent log injection
+    fn sanitize_for_log(s: &str) -> String {
+        // Remove or escape control characters that could break JSON structure
+        s.chars()
+            .filter(|c| {
+                // Allow printable ASCII and Unicode beyond ASCII
+                !c.is_control() || *c == '\n' || *c == '\r' || *c == '\t'
+            })
+            .map(|c| {
+                // Escape newlines and tabs for JSON safety
+                match c {
+                    '\n' => "\\n",
+                    '\r' => "\\r",
+                    '\t' => "\\t",
+                    _ => return c.to_string(),
+                }
+                .to_string()
+            })
+            .collect()
+    }
+
     pub fn new(
         action: String,
         environment: String,
@@ -27,6 +50,13 @@ impl AuditLogEntry {
         old_value: Option<String>,
         new_value: Option<String>,
     ) -> Self {
+        // Sanitize all string inputs to prevent log injection
+        let sanitized_action = Self::sanitize_for_log(&action);
+        let sanitized_environment = Self::sanitize_for_log(&environment);
+        let sanitized_key = key.map(|k| Self::sanitize_for_log(&k));
+        let sanitized_old_value = old_value.map(|v| Self::sanitize_for_log(&v));
+        let sanitized_new_value = new_value.map(|v| Self::sanitize_for_log(&v));
+
         // Automatic masking of sensitive data
         let mask_value = |k: &str, v: Option<String>| -> Option<String> {
             if let Some(val) = v {
@@ -45,23 +75,23 @@ impl AuditLogEntry {
             }
         };
 
-        let final_old_value = if let Some(ref k) = key {
-            mask_value(k, old_value)
+        let final_old_value = if let Some(ref k) = sanitized_key {
+            mask_value(k, sanitized_old_value)
         } else {
-            old_value
+            sanitized_old_value
         };
 
-        let final_new_value = if let Some(ref k) = key {
-            mask_value(k, new_value)
+        let final_new_value = if let Some(ref k) = sanitized_key {
+            mask_value(k, sanitized_new_value)
         } else {
-            new_value
+            sanitized_new_value
         };
 
         AuditLogEntry {
             timestamp: Utc::now(),
-            action,
-            environment,
-            key,
+            action: sanitized_action,
+            environment: sanitized_environment,
+            key: sanitized_key,
             old_value: final_old_value,
             new_value: final_new_value,
             user: std::env::var("USER")
@@ -91,7 +121,20 @@ impl AuditLogEntry {
     }
 
     pub fn log_to_file(&mut self, log_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-        // 1. Get the previous hash from the last line of the file
+        // Acquire exclusive lock to prevent race conditions during concurrent writes
+        // Use the same directory as the log file for the lock
+        let log_path_obj = Path::new(log_path);
+        let lock_dir = log_path_obj.parent().unwrap_or(Path::new("."));
+        let lock_path = lock_dir.join("audit.lock");
+
+        let _lock = locking::FileLock::acquire_exclusive(&lock_path).map_err(|e| {
+            Box::new(std::io::Error::other(format!(
+                "Could not acquire audit lock: {}",
+                e
+            ))) as Box<dyn std::error::Error>
+        })?;
+
+        // Get the previous hash from the last line of the file
         let prev_hash = if Path::new(log_path).exists() {
             let file = fs::File::open(log_path)?;
             let reader = std::io::BufReader::new(file);
@@ -120,6 +163,8 @@ impl AuditLogEntry {
 
         let log_line = serde_json::to_string(self)?;
         writeln!(file, "{}", log_line)?;
+
+        // Lock automatically released when _lock goes out of scope
         Ok(())
     }
 
@@ -1174,8 +1219,8 @@ mod tests {
         assert_eq!(logs[2].new_value, Some("********".to_string())); // TOKEN
         assert_eq!(logs[3].new_value, Some("********".to_string())); // SECRET
         assert_eq!(logs[4].new_value, Some("********".to_string())); // AUTH
-        // The masking logic checks for keywords like "pass", "secret", "key", "token", "auth"
-        // "NORMAL_KEY" contains "key" so it will be masked
+                                                                     // The masking logic checks for keywords like "pass", "secret", "key", "token", "auth"
+                                                                     // "NORMAL_KEY" contains "key" so it will be masked
         assert_eq!(logs[5].new_value, Some("********".to_string())); // NORMAL_KEY (masked because contains "key")
 
         // Verify integrity

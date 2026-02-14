@@ -4,7 +4,11 @@ use super::crypto;
 use super::locking;
 use super::security;
 use crate::core::models::*;
-use sha2::{Digest, Sha256};
+use argon2::{
+    password_hash::{PasswordHasher, SaltString},
+    Argon2,
+};
+use rand::rngs::OsRng;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -63,10 +67,15 @@ pub fn init_project() -> Result<(), PersistenceError> {
         );
     }
 
+    // Generate a random salt for key derivation
+    let salt = SaltString::generate(&mut OsRng);
+    let salt_b64 = salt.to_string();
+
     let config = ConfigFile {
         project_name: "My Project".to_string(),
         version: "0.1.0".to_string(),
         environments,
+        salt: Some(salt_b64),
     };
 
     save_json(CONFIG_FILE, &config)?;
@@ -133,6 +142,22 @@ pub fn import_from_env(file_path: &str, env: &str) -> Result<ConfigFile, Persist
         source: std::io::Error::new(std::io::ErrorKind::InvalidInput, e),
     })?;
 
+    // Prevent symlink attacks - check if path is a symlink pointing outside
+    if security::is_symlink(&sanitized_path) {
+        // For import, we allow symlinks but validate they don't escape
+        // Get current working directory as base
+        let base_dir = std::env::current_dir()
+            .map_err(|_| PersistenceError::IoError {
+                source: std::io::Error::other("Cannot determine base directory"),
+            })?;
+        
+        security::resolve_and_validate_path(&sanitized_path, &base_dir).map_err(|e| {
+            PersistenceError::IoError {
+                source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+            }
+        })?;
+    }
+
     // Check file size before reading (max 1MB)
     security::check_file_size(&sanitized_path, 1024 * 1024) // 1MB limit
         .map_err(|e| PersistenceError::IoError {
@@ -177,6 +202,18 @@ pub fn import_from_yaml(file_path: &str, env: &str) -> Result<ConfigFile, Persis
         source: std::io::Error::new(std::io::ErrorKind::InvalidInput, e),
     })?;
 
+    // Prevent symlink attacks
+    if security::is_symlink(&sanitized_path) {
+        let base_dir = std::env::current_dir().map_err(|_| PersistenceError::IoError {
+            source: std::io::Error::other("Cannot determine base directory"),
+        })?;
+        security::resolve_and_validate_path(&sanitized_path, &base_dir).map_err(|e| {
+            PersistenceError::IoError {
+                source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+            }
+        })?;
+    }
+
     security::check_file_size(&sanitized_path, 1024 * 1024).map_err(|e| {
         PersistenceError::IoError {
             source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
@@ -210,6 +247,18 @@ pub fn import_from_json(file_path: &str, env: &str) -> Result<ConfigFile, Persis
     security::validate_environment_name(env).map_err(|e| PersistenceError::IoError {
         source: std::io::Error::new(std::io::ErrorKind::InvalidInput, e),
     })?;
+
+    // Prevent symlink attacks
+    if security::is_symlink(&sanitized_path) {
+        let base_dir = std::env::current_dir().map_err(|_| PersistenceError::IoError {
+            source: std::io::Error::other("Cannot determine base directory"),
+        })?;
+        security::resolve_and_validate_path(&sanitized_path, &base_dir).map_err(|e| {
+            PersistenceError::IoError {
+                source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+            }
+        })?;
+    }
 
     security::check_file_size(&sanitized_path, 1024 * 1024).map_err(|e| {
         PersistenceError::IoError {
@@ -260,6 +309,9 @@ fn merge_map_into_config(
         fields: vec![],
     });
 
+    // Check if schema is defined (not empty) - if so, enforce schema
+    let schema_is_defined = !schema.fields.is_empty();
+
     // Check if environment exists, if not, create it
     if !config.environments.contains_key(env) {
         config.environments.insert(
@@ -277,6 +329,14 @@ fn merge_map_into_config(
             security::validate_config_key(&key).map_err(|e| PersistenceError::IoError {
                 source: std::io::Error::new(std::io::ErrorKind::InvalidInput, e),
             })?;
+
+            // Check if key is in schema when schema is defined
+            if schema_is_defined && !schema.fields.iter().any(|f| f.key == key) {
+                return Err(PersistenceError::ValidationError(format!(
+                    "Key '{}' is not defined in schema. Schema enforcement is enabled.",
+                    key
+                )));
+            }
 
             // Sanitize the value
             let sanitized_value = security::sanitize_string_value(&value);
@@ -338,6 +398,14 @@ pub fn export_to_env(
 
     let mut file = fs::File::create(sanitized_path)?;
     for (key, entry) in &env_config.entries {
+        // Skip encrypted secrets - should not be exported in plaintext
+        if entry.is_secret && entry.encrypted {
+            writeln!(file, "# SKIPPED: {} (secret value - not exported for security)", key)?;
+            continue;
+        }
+        
+        // If secret but not encrypted, try to use as-is (user responsibility)
+        // If not secret, export normally
         writeln!(file, "{}={}", key, entry.value)?;
     }
 
@@ -370,23 +438,66 @@ pub fn export_to_yaml(
             ),
         })?;
 
-    let serialized = serde_yaml::to_string(&env_config.entries)?;
+    // Filter out encrypted secrets for security
+    let filtered_entries: std::collections::HashMap<String, String> = env_config
+        .entries
+        .iter()
+        .filter(|(_, entry)| !(entry.is_secret && entry.encrypted))
+        .map(|(k, v)| (k.clone(), v.value.clone()))
+        .collect();
+
+    let serialized = serde_yaml::to_string(&filtered_entries)?;
     fs::write(sanitized_path, serialized)?;
 
     Ok(())
 }
 
-// Helper function to get encryption key
+// Helper function to get encryption key using Argon2 with salt
 fn get_encryption_key() -> Result<[u8; 32], PersistenceError> {
     let key_str =
         env::var("NARU_ENCRYPTION_KEY").map_err(|_| PersistenceError::MissingEncryptionKey)?;
 
-    let mut hasher = Sha256::new();
-    hasher.update(key_str.as_bytes());
-    let result = hasher.finalize();
+    // Load config to get the salt
+    let config: ConfigFile = load_json(CONFIG_FILE).map_err(|_| {
+        PersistenceError::IoError {
+            source: std::io::Error::other("Cannot load config for key derivation"),
+        }
+    })?;
 
+    let salt_str = config.salt.ok_or_else(|| {
+        PersistenceError::IoError {
+            source: std::io::Error::other("No salt found in config. Run 'naru init' to regenerate."),
+        }
+    })?;
+
+    // Parse the salt from base64
+    let salt = SaltString::from_b64(&salt_str).map_err(|e| {
+        PersistenceError::IoError {
+            source: std::io::Error::other(format!("Invalid salt: {}", e)),
+        }
+    })?;
+
+    // Use Argon2id for key derivation (more secure than simple hash)
+    let argon2 = Argon2::default();
+    let hash = argon2
+        .hash_password(key_str.as_bytes(), &salt)
+        .map_err(|e| {
+            PersistenceError::IoError {
+                source: std::io::Error::other(format!("Key derivation failed: {}", e)),
+            }
+        })?;
+
+    // Extract the hash output (first 32 bytes for AES-256)
+    let hash_output = hash.hash.ok_or_else(|| {
+        PersistenceError::IoError {
+            source: std::io::Error::other("No hash output generated"),
+        }
+    })?;
+
+    let hash_bytes = hash_output.as_bytes();
     let mut key = [0u8; 32];
-    key.copy_from_slice(&result);
+    let len = std::cmp::min(hash_bytes.len(), 32);
+    key[..len].copy_from_slice(&hash_bytes[..len]);
     Ok(key)
 }
 
@@ -464,6 +575,7 @@ mod tests {
             project_name: "Test Project".to_string(),
             version: "1.0.0".to_string(),
             environments: std::collections::HashMap::new(),
+            salt: None,
         };
 
         save_json(CONFIG_FILE, &test_config).unwrap();
@@ -583,10 +695,16 @@ mod tests {
     #[test]
     #[serial]
     fn test_get_encryption_key_derivation() {
-        unsafe { std::env::set_var("NARU_ENCRYPTION_KEY", "short") };
+        let temp_dir = TempDir::new().unwrap();
+        let _guard = TestDirGuard::new(temp_dir.path());
+        
+        // Initialize project to create salt
+        init_project().unwrap();
+        
+        unsafe { std::env::set_var("NARU_ENCRYPTION_KEY", "test_key_for_encryption") };
         let key1 = get_encryption_key().unwrap();
 
-        unsafe { std::env::set_var("NARU_ENCRYPTION_KEY", "different_longer_key_string") };
+        unsafe { std::env::set_var("NARU_ENCRYPTION_KEY", "different_key_string") };
         let key2 = get_encryption_key().unwrap();
 
         assert_ne!(key1, key2);
@@ -1179,6 +1297,7 @@ MALFORMED4="nested"quote"
             project_name: "Large Test Project".to_string(),
             version: "1.0.0".to_string(),
             environments,
+            salt: None,
         };
 
         save_json(CONFIG_FILE, &large_config).unwrap();

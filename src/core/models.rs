@@ -6,6 +6,7 @@ pub struct ConfigFile {
     pub project_name: String,
     pub version: String,
     pub environments: HashMap<String, EnvironmentConfig>,
+    pub salt: Option<String>, // Base64 encoded salt for key derivation
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -103,6 +104,7 @@ mod tests {
             project_name: "Test".into(),
             version: "1.0".into(),
             environments,
+            salt: None,
         };
 
         let cloned = config.clone();
