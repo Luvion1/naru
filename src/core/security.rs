@@ -1,4 +1,9 @@
 use std::path::{Path, PathBuf};
+use unicode_normalization::UnicodeNormalization;
+
+fn normalize_unicode(input: &str) -> String {
+    input.nfc().collect()
+}
 
 /// Sanitize file path to prevent directory traversal attacks
 pub fn sanitize_file_path(path: &str) -> Result<PathBuf, &'static str> {
@@ -109,13 +114,16 @@ fn normalize_path(path: &Path) -> PathBuf {
 
 /// Validate environment name to prevent injection attacks
 pub fn validate_environment_name(name: &str) -> Result<(), &'static str> {
+    // Normalize Unicode to NFC form to prevent bypass via different encodings
+    let normalized = normalize_unicode(name);
+
     // Check if name is empty
-    if name.is_empty() {
+    if normalized.is_empty() {
         return Err("Environment name cannot be empty");
     }
 
     // Check for invalid characters
-    if !name
+    if !normalized
         .chars()
         .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
     {
@@ -125,7 +133,7 @@ pub fn validate_environment_name(name: &str) -> Result<(), &'static str> {
     }
 
     // Check length limits
-    if name.len() > 100 {
+    if normalized.len() > 100 {
         return Err("Environment name is too long (max 100 characters)");
     }
 
@@ -134,13 +142,16 @@ pub fn validate_environment_name(name: &str) -> Result<(), &'static str> {
 
 /// Validate configuration key to prevent injection attacks
 pub fn validate_config_key(key: &str) -> Result<(), &'static str> {
+    // Normalize Unicode to NFC form to prevent bypass via different encodings
+    let normalized = normalize_unicode(key);
+
     // Check if key is empty
-    if key.is_empty() {
+    if normalized.is_empty() {
         return Err("Configuration key cannot be empty");
     }
 
     // Check for invalid characters
-    if !key
+    if !normalized
         .chars()
         .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.')
     {
@@ -149,8 +160,8 @@ pub fn validate_config_key(key: &str) -> Result<(), &'static str> {
         );
     }
 
-    // Check length limits
-    if key.len() > 255 {
+    // Check length limits (using normalized string)
+    if normalized.len() > 255 {
         return Err("Configuration key is too long (max 255 characters)");
     }
 

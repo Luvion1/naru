@@ -1,8 +1,57 @@
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+use argon2::{password_hash::rand_core::OsRng, Argon2};
 use hex;
 use rand::RngCore;
-use rand::rngs::OsRng;
+use zeroize::Zeroize;
+
+pub fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32], Box<dyn std::error::Error>> {
+    let mut key = Box::new([0u8; 32]);
+    let argon2 = Argon2::default();
+    argon2
+        .hash_password_into(password.as_bytes(), salt, &mut *key)
+        .map_err(|e| {
+            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
+        })?;
+    let result = *key;
+    key.zeroize();
+    Ok(result)
+}
+
+pub fn derive_key_secure(
+    password: &str,
+    salt: &[u8],
+) -> Result<[u8; 32], Box<dyn std::error::Error>> {
+    let mut key = Box::new([0u8; 32]);
+    let argon2 = Argon2::default();
+    argon2
+        .hash_password_into(password.as_bytes(), salt, &mut *key)
+        .map_err(|e| {
+            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
+        })?;
+    let result = *key;
+    key.zeroize();
+    Ok(result)
+}
+
+pub fn is_key_too_weak(key: &[u8; 32]) -> bool {
+    use std::collections::HashSet;
+    let unique_bytes = key.iter().collect::<HashSet<_>>().len();
+    unique_bytes < 8
+}
+
+pub fn validate_key_strength(key: &[u8; 32]) -> Result<(), &'static str> {
+    if is_key_too_weak(key) {
+        return Err("Encryption key is too weak (insufficient entropy)");
+    }
+    Ok(())
+}
+
+pub fn generate_salt() -> [u8; 16] {
+    let mut salt = [0u8; 16];
+    OsRng.fill_bytes(&mut salt);
+    salt
+}
 
 pub fn encrypt_data(data: &str, key: &[u8; 32]) -> Result<String, Box<dyn std::error::Error>> {
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|e| {

@@ -121,9 +121,15 @@ impl AuditLogEntry {
     }
 
     pub fn log_to_file(&mut self, log_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        use crate::core::security;
+
+        // Sanitize log path to prevent path traversal attacks
+        let sanitized_log_path = security::sanitize_file_path(log_path)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+
         // Acquire exclusive lock to prevent race conditions during concurrent writes
         // Use the same directory as the log file for the lock
-        let log_path_obj = Path::new(log_path);
+        let log_path_obj = Path::new(&sanitized_log_path);
         let lock_dir = log_path_obj.parent().unwrap_or(Path::new("."));
         let lock_path = lock_dir.join("audit.lock");
 
@@ -135,8 +141,8 @@ impl AuditLogEntry {
         })?;
 
         // Get the previous hash from the last line of the file
-        let prev_hash = if Path::new(log_path).exists() {
-            let file = fs::File::open(log_path)?;
+        let prev_hash = if Path::new(&sanitized_log_path).exists() {
+            let file = fs::File::open(&sanitized_log_path)?;
             let reader = std::io::BufReader::new(file);
             if let Some(last_line) = reader.lines().map_while(Result::ok).last() {
                 if let Ok(last_entry) = serde_json::from_str::<AuditLogEntry>(&last_line) {
@@ -159,7 +165,7 @@ impl AuditLogEntry {
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(log_path)?;
+            .open(&sanitized_log_path)?;
 
         let log_line = serde_json::to_string(self)?;
         writeln!(file, "{}", log_line)?;
@@ -172,11 +178,15 @@ impl AuditLogEntry {
         log_path: &str,
         count: usize,
     ) -> Result<Vec<AuditLogEntry>, Box<dyn std::error::Error>> {
-        if !Path::new(log_path).exists() {
+        // Sanitize log path to prevent path traversal attacks
+        let sanitized_log_path = crate::core::security::sanitize_file_path(log_path)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+
+        if !Path::new(&sanitized_log_path).exists() {
             return Ok(Vec::new());
         }
 
-        let file = fs::File::open(log_path)?;
+        let file = fs::File::open(&sanitized_log_path)?;
         let reader = std::io::BufReader::new(file);
         let mut entries: Vec<AuditLogEntry> = Vec::with_capacity(count);
 
@@ -197,11 +207,15 @@ impl AuditLogEntry {
 
     // Function to verify the integrity of the audit log
     pub fn verify_log_integrity(log_path: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        if !Path::new(log_path).exists() {
+        // Sanitize log path to prevent path traversal attacks
+        let sanitized_log_path = crate::core::security::sanitize_file_path(log_path)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+
+        if !Path::new(&sanitized_log_path).exists() {
             return Ok(true);
         }
 
-        let file = fs::File::open(log_path)?;
+        let file = fs::File::open(&sanitized_log_path)?;
         let reader = std::io::BufReader::new(file);
 
         let mut expected_prev_hash =

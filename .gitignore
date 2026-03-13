@@ -2,3 +2,7 @@
 zig-bin/
 zig-out/
 zig-cache/
+*.pyc
+__pycache__/
+*.log
+.naru/

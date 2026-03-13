@@ -2,6 +2,7 @@ use super::audit;
 use super::constants::*;
 use super::crypto;
 use super::locking;
+use super::rate_limiter::{RateLimitError, RateLimiter};
 use super::security;
 use crate::core::models::*;
 use argon2::{
@@ -14,8 +15,15 @@ use std::env;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use thiserror::Error;
+
+static RATE_LIMITER: OnceLock<RateLimiter> = OnceLock::new();
+
+fn get_rate_limiter() -> &'static RateLimiter {
+    RATE_LIMITER.get_or_init(|| RateLimiter::with_default_config())
+}
 
 #[derive(Error, Debug)]
 pub enum PersistenceError {
@@ -62,6 +70,7 @@ pub fn init_project() -> Result<(), PersistenceError> {
         environments.insert(
             env.to_string(),
             EnvironmentConfig {
+                parent: None,
                 entries: HashMap::new(),
             },
         );
@@ -111,7 +120,6 @@ pub fn save_json<T: serde::Serialize>(filename: &str, data: &T) -> Result<(), Pe
 }
 
 pub fn load_json<T: serde::de::DeserializeOwned>(filename: &str) -> Result<T, PersistenceError> {
-    // Sanitize filename to prevent directory traversal
     let sanitized_filename =
         security::sanitize_file_path(filename).map_err(|e| PersistenceError::IoError {
             source: std::io::Error::new(std::io::ErrorKind::InvalidInput, e),
@@ -119,7 +127,6 @@ pub fn load_json<T: serde::de::DeserializeOwned>(filename: &str) -> Result<T, Pe
 
     let path = Path::new(NARU_DIR).join(sanitized_filename);
 
-    // Acquire a lock before reading
     let _lock =
         locking::FileLock::acquire_exclusive(&path).map_err(|e| PersistenceError::IoError {
             source: std::io::Error::other(format!("Could not acquire file lock: {}", e)),
@@ -128,6 +135,73 @@ pub fn load_json<T: serde::de::DeserializeOwned>(filename: &str) -> Result<T, Pe
     let content = fs::read_to_string(path)?;
     let data = serde_json::from_str(&content)?;
     Ok(data)
+}
+
+pub struct LockedFile {
+    _lock: locking::FileLock,
+    path: std::path::PathBuf,
+}
+
+impl LockedFile {
+    pub fn read<T: serde::de::DeserializeOwned>(&self) -> Result<T, PersistenceError> {
+        let content =
+            fs::read_to_string(&self.path).map_err(|e| PersistenceError::IoError { source: e })?;
+        serde_json::from_str(&content).map_err(|e| PersistenceError::JsonError { source: e })
+    }
+
+    pub fn write<T: serde::Serialize>(&self, data: &T) -> Result<(), PersistenceError> {
+        let json = serde_json::to_string_pretty(data)?;
+        fs::write(&self.path, json).map_err(|e| PersistenceError::IoError { source: e })?;
+        Ok(())
+    }
+
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+pub fn lock_file(filename: &str) -> Result<LockedFile, PersistenceError> {
+    let sanitized_filename =
+        security::sanitize_file_path(filename).map_err(|e| PersistenceError::IoError {
+            source: std::io::Error::new(std::io::ErrorKind::InvalidInput, e),
+        })?;
+
+    let path = Path::new(NARU_DIR).join(sanitized_filename);
+
+    let _lock =
+        locking::FileLock::acquire_exclusive(&path).map_err(|e| PersistenceError::IoError {
+            source: std::io::Error::other(format!("Could not acquire file lock: {}", e)),
+        })?;
+
+    Ok(LockedFile { _lock, path })
+}
+
+pub fn atomic_update_config<F>(update_fn: F) -> Result<(), PersistenceError>
+where
+    F: FnOnce(&mut ConfigFile) -> Result<(), PersistenceError>,
+{
+    let locked = lock_file(CONFIG_FILE)?;
+    let mut config: ConfigFile = locked.read()?;
+
+    update_fn(&mut config)?;
+
+    // Write atomically by writing to temp file first, then renaming
+    let temp_path = locked.path().with_extension("json.tmp");
+    let json = serde_json::to_string_pretty(&config)
+        .map_err(|e| PersistenceError::JsonError { source: e })?;
+    fs::write(&temp_path, json).map_err(|e| PersistenceError::IoError { source: e })?;
+    fs::rename(&temp_path, &locked.path()).map_err(|e| PersistenceError::IoError { source: e })?;
+
+    Ok(())
+}
+
+pub fn atomic_read_config<F, R>(read_fn: F) -> Result<R, PersistenceError>
+where
+    F: FnOnce(&ConfigFile) -> R,
+{
+    let locked = lock_file(CONFIG_FILE)?;
+    let config: ConfigFile = locked.read()?;
+    Ok(read_fn(&config))
 }
 
 pub fn import_from_env(file_path: &str, env: &str) -> Result<ConfigFile, PersistenceError> {
@@ -146,11 +220,10 @@ pub fn import_from_env(file_path: &str, env: &str) -> Result<ConfigFile, Persist
     if security::is_symlink(&sanitized_path) {
         // For import, we allow symlinks but validate they don't escape
         // Get current working directory as base
-        let base_dir = std::env::current_dir()
-            .map_err(|_| PersistenceError::IoError {
-                source: std::io::Error::other("Cannot determine base directory"),
-            })?;
-        
+        let base_dir = std::env::current_dir().map_err(|_| PersistenceError::IoError {
+            source: std::io::Error::other("Cannot determine base directory"),
+        })?;
+
         security::resolve_and_validate_path(&sanitized_path, &base_dir).map_err(|e| {
             PersistenceError::IoError {
                 source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
@@ -317,6 +390,7 @@ fn merge_map_into_config(
         config.environments.insert(
             env.to_string(),
             EnvironmentConfig {
+                parent: None,
                 entries: HashMap::new(),
             },
         );
@@ -400,10 +474,14 @@ pub fn export_to_env(
     for (key, entry) in &env_config.entries {
         // Skip encrypted secrets - should not be exported in plaintext
         if entry.is_secret && entry.encrypted {
-            writeln!(file, "# SKIPPED: {} (secret value - not exported for security)", key)?;
+            writeln!(
+                file,
+                "# SKIPPED: {} (secret value - not exported for security)",
+                key
+            )?;
             continue;
         }
-        
+
         // If secret but not encrypted, try to use as-is (user responsibility)
         // If not secret, export normally
         writeln!(file, "{}={}", key, entry.value)?;
@@ -454,44 +532,51 @@ pub fn export_to_yaml(
 
 // Helper function to get encryption key using Argon2 with salt
 fn get_encryption_key() -> Result<[u8; 32], PersistenceError> {
+    // Rate limit encryption key access to prevent brute-force attacks
+    let rate_limiter = get_rate_limiter();
+    let identifier = format!(
+        "{}_{}",
+        std::process::id(),
+        std::env::var("USER").unwrap_or_else(|_| "unknown".to_string())
+    );
+
+    if let Err(e) = rate_limiter.check_rate_limit(&identifier) {
+        return Err(PersistenceError::IoError {
+            source: std::io::Error::other(format!(
+                "Rate limit exceeded: {}. Too many decryption attempts.",
+                e
+            )),
+        });
+    }
+
     let key_str =
         env::var("NARU_ENCRYPTION_KEY").map_err(|_| PersistenceError::MissingEncryptionKey)?;
 
     // Load config to get the salt
-    let config: ConfigFile = load_json(CONFIG_FILE).map_err(|_| {
-        PersistenceError::IoError {
-            source: std::io::Error::other("Cannot load config for key derivation"),
-        }
+    let config: ConfigFile = load_json(CONFIG_FILE).map_err(|_| PersistenceError::IoError {
+        source: std::io::Error::other("Cannot load config for key derivation"),
     })?;
 
-    let salt_str = config.salt.ok_or_else(|| {
-        PersistenceError::IoError {
-            source: std::io::Error::other("No salt found in config. Run 'naru init' to regenerate."),
-        }
+    let salt_str = config.salt.ok_or_else(|| PersistenceError::IoError {
+        source: std::io::Error::other("No salt found in config. Run 'naru init' to regenerate."),
     })?;
 
     // Parse the salt from base64
-    let salt = SaltString::from_b64(&salt_str).map_err(|e| {
-        PersistenceError::IoError {
-            source: std::io::Error::other(format!("Invalid salt: {}", e)),
-        }
+    let salt = SaltString::from_b64(&salt_str).map_err(|e| PersistenceError::IoError {
+        source: std::io::Error::other(format!("Invalid salt: {}", e)),
     })?;
 
     // Use Argon2id for key derivation (more secure than simple hash)
     let argon2 = Argon2::default();
     let hash = argon2
         .hash_password(key_str.as_bytes(), &salt)
-        .map_err(|e| {
-            PersistenceError::IoError {
-                source: std::io::Error::other(format!("Key derivation failed: {}", e)),
-            }
+        .map_err(|e| PersistenceError::IoError {
+            source: std::io::Error::other(format!("Key derivation failed: {}", e)),
         })?;
 
     // Extract the hash output (first 32 bytes for AES-256)
-    let hash_output = hash.hash.ok_or_else(|| {
-        PersistenceError::IoError {
-            source: std::io::Error::other("No hash output generated"),
-        }
+    let hash_output = hash.hash.ok_or_else(|| PersistenceError::IoError {
+        source: std::io::Error::other("No hash output generated"),
     })?;
 
     let hash_bytes = hash_output.as_bytes();
@@ -507,10 +592,10 @@ pub fn encrypt_if_needed(
     env: &str,
     key: &str,
 ) -> Result<(), PersistenceError> {
-    if let Some(env_config) = config.environments.get_mut(env)
-        && let Some(entry) = env_config.entries.get_mut(key)
-    {
-        encrypt_entry_value(entry)?;
+    if let Some(env_config) = config.environments.get_mut(env) {
+        if let Some(entry) = env_config.entries.get_mut(key) {
+            encrypt_entry_value(entry)?;
+        }
     }
     Ok(())
 }
@@ -521,19 +606,21 @@ pub fn decrypt_if_needed(
     env: &str,
     key: &str,
 ) -> Result<(), PersistenceError> {
-    if let Some(env_config) = config.environments.get_mut(env)
-        && let Some(entry) = env_config.entries.get_mut(key)
-        && entry.encrypted
-    {
-        let encryption_key = get_encryption_key()?;
-        let decrypted_value = crypto::decrypt_data(&entry.value, &encryption_key).map_err(|e| {
-            PersistenceError::IoError {
-                source: std::io::Error::other(e.to_string()),
-            }
-        })?;
+    if let Some(env_config) = config.environments.get_mut(env) {
+        if let Some(entry) = env_config.entries.get_mut(key) {
+            if entry.encrypted {
+                let encryption_key = get_encryption_key()?;
+                let decrypted_value =
+                    crypto::decrypt_data(&entry.value, &encryption_key).map_err(|e| {
+                        PersistenceError::IoError {
+                            source: std::io::Error::other(e.to_string()),
+                        }
+                    })?;
 
-        entry.value = decrypted_value;
-        entry.encrypted = false;
+                entry.value = decrypted_value;
+                entry.encrypted = false;
+            }
+        }
     }
     Ok(())
 }
@@ -697,10 +784,10 @@ mod tests {
     fn test_get_encryption_key_derivation() {
         let temp_dir = TempDir::new().unwrap();
         let _guard = TestDirGuard::new(temp_dir.path());
-        
+
         // Initialize project to create salt
         init_project().unwrap();
-        
+
         unsafe { std::env::set_var("NARU_ENCRYPTION_KEY", "test_key_for_encryption") };
         let key1 = get_encryption_key().unwrap();
 
@@ -1291,7 +1378,13 @@ MALFORMED4="nested"quote"
                 ConfigValueEntry::new(&format!("VALUE_{}", i), "string", false),
             );
         }
-        environments.insert("development".to_string(), EnvironmentConfig { entries });
+        environments.insert(
+            "development".to_string(),
+            EnvironmentConfig {
+                parent: None,
+                entries,
+            },
+        );
 
         let large_config = ConfigFile {
             project_name: "Large Test Project".to_string(),

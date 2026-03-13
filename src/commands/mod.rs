@@ -1,0 +1,22 @@
+pub mod audit;
+pub mod backup;
+pub mod batch;
+pub mod convert;
+pub mod crypto;
+pub mod diff;
+pub mod env;
+pub mod export;
+pub mod get;
+pub mod import;
+pub mod init;
+pub mod list;
+pub mod schema;
+pub mod set;
+pub mod template;
+pub mod validate;
+
+use anyhow::Result;
+
+pub trait Command {
+    fn execute(&self) -> Result<()>;
+}

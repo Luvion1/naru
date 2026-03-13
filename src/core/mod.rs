@@ -7,6 +7,7 @@ pub mod locking;
 pub mod models;
 pub mod persistence;
 pub mod project;
+pub mod rate_limiter;
 pub mod schema;
 pub mod security;
 pub mod storage;

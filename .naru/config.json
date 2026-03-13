@@ -2,14 +2,18 @@
   "project_name": "My Project",
   "version": "0.1.0",
   "environments": {
-    "production": {
-      "entries": {}
-    },
     "development": {
+      "parent": null,
       "entries": {}
     },
     "staging": {
+      "parent": null,
+      "entries": {}
+    },
+    "production": {
+      "parent": null,
       "entries": {}
     }
-  }
+  },
+  "salt": "nMqMYq/G3eNPxRYiwj0e4A"
 }

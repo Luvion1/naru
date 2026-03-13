@@ -74,6 +74,7 @@ impl ConfigFormat for PropertiesFormat {
                         environments
                             .entry(env_name.to_string())
                             .or_insert(EnvironmentConfig {
+                                parent: None,
                                 entries: HashMap::new(),
                             });
 

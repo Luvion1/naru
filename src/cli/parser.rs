@@ -106,6 +106,16 @@ pub enum Commands {
     },
     /// Validate configurations against schema
     Validate,
+    /// Batch operations (set/get multiple keys at once)
+    Batch {
+        #[command(subcommand)]
+        action: BatchAction,
+    },
+    /// Template operations (create/apply config templates)
+    Template {
+        #[command(subcommand)]
+        action: TemplateAction,
+    },
     /// Show version information
     Version,
 }
@@ -166,6 +176,13 @@ pub enum EnvAction {
         /// Name of the environment to remove
         name: String,
     },
+    /// Set a parent environment for inheritance
+    SetParent {
+        /// The environment name
+        name: String,
+        /// The parent environment name
+        parent: String,
+    },
     /// List all environments
     List,
 }
@@ -198,4 +215,52 @@ pub enum SchemaAction {
         /// Key name to edit (omit for interactive mode)
         key: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+pub enum BatchAction {
+    /// Set multiple keys from a file (one key=value per line)
+    Set {
+        /// Path to file with key=value pairs
+        file: String,
+        /// The environment
+        #[arg(short, long, default_value = "development")]
+        env: String,
+    },
+    /// Get multiple keys and output as key=value pairs
+    Get {
+        /// Keys to get (space-separated)
+        keys: Vec<String>,
+        /// The environment
+        #[arg(short, long, default_value = "development")]
+        env: String,
+    },
+    /// Get all keys from an environment
+    All {
+        /// The environment
+        #[arg(short, long, default_value = "development")]
+        env: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum TemplateAction {
+    /// Create a template from current configuration
+    Create {
+        /// Template name
+        name: String,
+        /// Include secrets (default: false)
+        #[arg(long)]
+        include_secrets: bool,
+    },
+    /// Apply a template to current project
+    Apply {
+        /// Template name
+        name: String,
+        /// Target environment
+        #[arg(short, long, default_value = "development")]
+        env: String,
+    },
+    /// List available templates
+    List,
 }

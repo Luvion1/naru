@@ -17,15 +17,15 @@ pub fn validate_value(value: &str, field: &FieldDefinition) -> Result<(), String
 
     if let Some(rules) = &field.validation {
         if field.r#type == "string" {
-            if let Some(min) = rules.min_length
-                && value.len() < min
-            {
-                return Err(format!("Too short (min: {})", min));
+            if let Some(min) = rules.min_length {
+                if value.len() < min {
+                    return Err(format!("Too short (min: {})", min));
+                }
             }
-            if let Some(max) = rules.max_length
-                && value.len() > max
-            {
-                return Err(format!("Too long (max: {})", max));
+            if let Some(max) = rules.max_length {
+                if value.len() > max {
+                    return Err(format!("Too long (max: {})", max));
+                }
             }
             if let Some(pattern) = &rules.pattern {
                 let re = regex::Regex::new(pattern)
@@ -39,15 +39,15 @@ pub fn validate_value(value: &str, field: &FieldDefinition) -> Result<(), String
             let val = value
                 .parse::<i64>()
                 .map_err(|_| format!("'{}' is not a valid integer.", value))?;
-            if let Some(min) = rules.min_value
-                && val < min
-            {
-                return Err(format!("Less than minimum {}", min));
+            if let Some(min) = rules.min_value {
+                if val < min {
+                    return Err(format!("Less than minimum {}", min));
+                }
             }
-            if let Some(max) = rules.max_value
-                && val > max
-            {
-                return Err(format!("Greater than maximum {}", max));
+            if let Some(max) = rules.max_value {
+                if val > max {
+                    return Err(format!("Greater than maximum {}", max));
+                }
             }
         }
     }
@@ -417,7 +417,8 @@ mod tests {
         assert!(validate_value("hullo", &field).is_ok()); // Simple letter combination
         assert!(validate_value("üüü", &field).is_ok()); // Only accented chars
         assert!(validate_value("", &field).is_err()); // Empty string too short
-        assert!(validate_value("hello_world_that_is_way_too_long", &field).is_err()); // Too long
+        assert!(validate_value("hello_world_that_is_way_too_long", &field).is_err());
+        // Too long
     }
 
     #[test]
@@ -784,9 +785,9 @@ mod tests {
         // Test various Unicode categories
         assert!(validate_value("café", &field).is_ok()); // Latin with diacritics
         assert!(validate_value("Здравствуйте", &field).is_ok()); // Cyrillic
-        // The behavior for Arabic/Japanese depends on the regex engine's handling of \w
-        // In Rust's regex, \w typically includes Unicode word characters
-        // So these might pass depending on the implementation
+                                                                 // The behavior for Arabic/Japanese depends on the regex engine's handling of \w
+                                                                 // In Rust's regex, \w typically includes Unicode word characters
+                                                                 // So these might pass depending on the implementation
         assert!(validate_value("مرحبا", &field).is_ok()); // Arabic (may be accepted as \w in Rust)
         assert!(validate_value("こんにちは", &field).is_ok()); // Japanese (may be accepted as \w in Rust)
     }

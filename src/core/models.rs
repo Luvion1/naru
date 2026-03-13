@@ -9,8 +9,9 @@ pub struct ConfigFile {
     pub salt: Option<String>, // Base64 encoded salt for key derivation
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct EnvironmentConfig {
+    pub parent: Option<String>,
     pub entries: HashMap<String, ConfigValueEntry>,
 }
 
@@ -98,7 +99,13 @@ mod tests {
         let mut environments = HashMap::new();
         let mut entries = HashMap::new();
         entries.insert("K1".into(), ConfigValueEntry::new("V1", "string", false));
-        environments.insert("dev".into(), EnvironmentConfig { entries });
+        environments.insert(
+            "dev".into(),
+            EnvironmentConfig {
+                parent: None,
+                entries,
+            },
+        );
 
         let config = ConfigFile {
             project_name: "Test".into(),
