@@ -44,7 +44,7 @@ pub fn template_create(name: &str, include_secrets: bool) -> Result<(), Persiste
 
     let mut variables = Vec::new();
 
-    for (env_name, env_config) in &config.environments {
+    for env_config in config.environments.values() {
         for (key, entry) in &env_config.entries {
             if !include_secrets && entry.is_secret {
                 continue;

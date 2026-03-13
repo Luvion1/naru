@@ -17,6 +17,7 @@ pub mod validate;
 
 use anyhow::Result;
 
+#[allow(dead_code)]
 pub trait Command {
     fn execute(&self) -> Result<()>;
 }

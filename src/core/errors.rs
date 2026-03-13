@@ -208,6 +208,7 @@ impl serde::de::Error for NaruError {
     }
 }
 
+#[allow(dead_code)]
 pub type NaruResult<T> = Result<T, NaruError>;
 
 #[cfg(test)]

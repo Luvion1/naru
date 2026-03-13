@@ -9,7 +9,7 @@ use argon2::{
     password_hash::{PasswordHasher, SaltString},
     Argon2,
 };
-use rand::rngs::OsRng;
+use hex;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -22,7 +22,14 @@ use thiserror::Error;
 static RATE_LIMITER: OnceLock<RateLimiter> = OnceLock::new();
 
 fn get_rate_limiter() -> &'static RateLimiter {
-    RATE_LIMITER.get_or_init(|| RateLimiter::with_default_config())
+    RATE_LIMITER.get_or_init(RateLimiter::with_default_config)
+}
+
+#[allow(dead_code)]
+pub fn reset_rate_limit(identifier: &str) {
+    if let Some(limiter) = RATE_LIMITER.get() {
+        limiter.reset(identifier);
+    }
 }
 
 #[derive(Error, Debug)]
@@ -77,7 +84,11 @@ pub fn init_project() -> Result<(), PersistenceError> {
     }
 
     // Generate a random salt for key derivation
-    let salt = SaltString::generate(&mut OsRng);
+    let salt_bytes = crypto::generate_salt();
+    let salt =
+        SaltString::from_b64(&hex::encode(salt_bytes)).map_err(|e| PersistenceError::IoError {
+            source: std::io::Error::other(format!("Failed to create salt: {}", e)),
+        })?;
     let salt_b64 = salt.to_string();
 
     let config = ConfigFile {
@@ -149,6 +160,7 @@ impl LockedFile {
         serde_json::from_str(&content).map_err(|e| PersistenceError::JsonError { source: e })
     }
 
+    #[allow(dead_code)]
     pub fn write<T: serde::Serialize>(&self, data: &T) -> Result<(), PersistenceError> {
         let json = serde_json::to_string_pretty(data)?;
         fs::write(&self.path, json).map_err(|e| PersistenceError::IoError { source: e })?;
@@ -190,11 +202,12 @@ where
     let json = serde_json::to_string_pretty(&config)
         .map_err(|e| PersistenceError::JsonError { source: e })?;
     fs::write(&temp_path, json).map_err(|e| PersistenceError::IoError { source: e })?;
-    fs::rename(&temp_path, &locked.path()).map_err(|e| PersistenceError::IoError { source: e })?;
+    fs::rename(&temp_path, locked.path()).map_err(|e| PersistenceError::IoError { source: e })?;
 
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn atomic_read_config<F, R>(read_fn: F) -> Result<R, PersistenceError>
 where
     F: FnOnce(&ConfigFile) -> R,
@@ -541,13 +554,21 @@ fn get_encryption_key() -> Result<[u8; 32], PersistenceError> {
     );
 
     if let Err(e) = rate_limiter.check_rate_limit(&identifier) {
+        let error_msg = match e {
+            RateLimitError::TooManyAttempts => {
+                format!("Too many attempts ({}). Consider stopping for a while.", e)
+            }
+            RateLimitError::LockedOut(_) => {
+                format!("Rate limit exceeded: {}. Too many decryption attempts.", e)
+            }
+        };
         return Err(PersistenceError::IoError {
-            source: std::io::Error::other(format!(
-                "Rate limit exceeded: {}. Too many decryption attempts.",
-                e
-            )),
+            source: std::io::Error::other(error_msg),
         });
     }
+
+    // Periodically cleanup expired entries to prevent memory growth
+    rate_limiter.cleanup_expired();
 
     let key_str =
         env::var("NARU_ENCRYPTION_KEY").map_err(|_| PersistenceError::MissingEncryptionKey)?;
@@ -583,6 +604,11 @@ fn get_encryption_key() -> Result<[u8; 32], PersistenceError> {
     let mut key = [0u8; 32];
     let len = std::cmp::min(hash_bytes.len(), 32);
     key[..len].copy_from_slice(&hash_bytes[..len]);
+
+    crypto::validate_key_strength(&key).map_err(|e| PersistenceError::IoError {
+        source: std::io::Error::other(format!("Key validation failed: {}", e)),
+    })?;
+
     Ok(key)
 }
 

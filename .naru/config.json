@@ -4,7 +4,14 @@
   "environments": {
     "development": {
       "parent": null,
-      "entries": {}
+      "entries": {
+        "KEY_5": {
+          "value": "VALUE_5",
+          "type": "string",
+          "is_secret": false,
+          "encrypted": false
+        }
+      }
     },
     "staging": {
       "parent": null,
@@ -15,5 +22,5 @@
       "entries": {}
     }
   },
-  "salt": "nMqMYq/G3eNPxRYiwj0e4A"
+  "salt": "fb5dab1d9ff37b3fc432a9192647c28e"
 }

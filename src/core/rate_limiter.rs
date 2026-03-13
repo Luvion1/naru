@@ -83,12 +83,19 @@ impl RateLimiter {
             return Err(RateLimitError::LockedOut(self.config.lockout_duration));
         }
 
+        // Warn if approaching max attempts (more than 75% of limit)
+        let warning_threshold = (self.config.max_attempts as f32 * 0.75) as usize;
+        if state.attempts.len() >= warning_threshold {
+            return Err(RateLimitError::TooManyAttempts);
+        }
+
         // Record this attempt
         state.attempts.push(now);
 
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn reset(&self, identifier: &str) {
         let mut states = self.states.lock().unwrap();
         if let Some(state) = states.get_mut(identifier) {

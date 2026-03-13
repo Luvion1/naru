@@ -5,6 +5,7 @@ use hex;
 use rand::RngCore;
 use zeroize::Zeroize;
 
+#[allow(dead_code)]
 pub fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32], Box<dyn std::error::Error>> {
     let mut key = Box::new([0u8; 32]);
     let argon2 = Argon2::default();
@@ -18,6 +19,7 @@ pub fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32], Box<dyn std::
     Ok(result)
 }
 
+#[allow(dead_code)]
 pub fn derive_key_secure(
     password: &str,
     salt: &[u8],
@@ -34,6 +36,7 @@ pub fn derive_key_secure(
     Ok(result)
 }
 
+#[allow(dead_code)]
 pub fn is_key_too_weak(key: &[u8; 32]) -> bool {
     use std::collections::HashSet;
     let unique_bytes = key.iter().collect::<HashSet<_>>().len();
