@@ -2,25 +2,25 @@
   "project_name": "My Project",
   "version": "0.1.0",
   "environments": {
-    "development": {
-      "parent": null,
-      "entries": {
-        "KEY_5": {
-          "value": "VALUE_5",
-          "type": "string",
-          "is_secret": false,
-          "encrypted": false
-        }
-      }
-    },
     "staging": {
       "parent": null,
       "entries": {}
+    },
+    "development": {
+      "parent": null,
+      "entries": {
+        "DB_PASSWORD": {
+          "value": "super_secret_123",
+          "type": "string",
+          "is_secret": true,
+          "encrypted": false
+        }
+      }
     },
     "production": {
       "parent": null,
       "entries": {}
     }
   },
-  "salt": "fb5dab1d9ff37b3fc432a9192647c28e"
+  "salt": "1d01776df5826e3db0d0a85d39221ace"
 }

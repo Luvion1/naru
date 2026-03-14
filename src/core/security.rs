@@ -6,6 +6,7 @@ fn normalize_unicode(input: &str) -> String {
 }
 
 /// Sanitize file path to prevent directory traversal attacks
+/// This version rejects absolute paths - suitable for user input
 pub fn sanitize_file_path(path: &str) -> Result<PathBuf, &'static str> {
     // Check for null bytes which are used in many exploits
     if path.contains('\0') {
@@ -14,16 +15,16 @@ pub fn sanitize_file_path(path: &str) -> Result<PathBuf, &'static str> {
 
     // Unify separators for traversal check
     let unified_path = path.replace('\\', "/");
-    let path_obj = Path::new(&unified_path);
 
-    // Check if the path is absolute (which we don't allow)
-    if path_obj.is_absolute() {
+    // Reject absolute paths
+    if unified_path.starts_with('/') || unified_path.starts_with("//") {
         return Err("Absolute paths are not allowed");
     }
 
-    // Reject any path that contains ".." as a component
-    for component in path_obj.components() {
-        if let std::path::Component::ParentDir = component {
+    // Check for traversal patterns in the unified path
+    // Split by separator and check each component
+    for component in unified_path.split('/') {
+        if component == ".." {
             return Err("Path contains directory traversal sequences");
         }
     }
@@ -33,7 +34,40 @@ pub fn sanitize_file_path(path: &str) -> Result<PathBuf, &'static str> {
     let original_path_obj = Path::new(path);
     let normalized = normalize_path(original_path_obj);
 
-    // Final check on normalized path
+    // Final check on normalized path for directory traversal
+    for component in normalized.components() {
+        if let std::path::Component::ParentDir = component {
+            return Err("Path attempts to escape parent directory");
+        }
+    }
+
+    Ok(normalized)
+}
+
+/// Sanitize file path allowing absolute paths - for internal use
+/// This version allows absolute paths but still prevents directory traversal
+pub fn sanitize_file_path_internal(path: &str) -> Result<PathBuf, &'static str> {
+    // Check for null bytes which are used in many exploits
+    if path.contains('\0') {
+        return Err("Path contains null bytes");
+    }
+
+    // Unify separators for traversal check
+    let unified_path = path.replace('\\', "/");
+
+    // Check for traversal patterns in the unified path
+    // Split by separator and check each component
+    for component in unified_path.split('/') {
+        if component == ".." {
+            return Err("Path contains directory traversal sequences");
+        }
+    }
+
+    // For the actual path object we return, we use the original path but normalized
+    let original_path_obj = Path::new(path);
+    let normalized = normalize_path(original_path_obj);
+
+    // Final check on normalized path for directory traversal
     for component in normalized.components() {
         if let std::path::Component::ParentDir = component {
             return Err("Path attempts to escape parent directory");

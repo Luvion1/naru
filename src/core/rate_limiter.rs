@@ -67,7 +67,7 @@ impl RateLimiter {
                 let remaining = lockout_until.duration_since(now);
                 return Err(RateLimitError::LockedOut(remaining));
             } else {
-                // Lockout expired, reset state
+                // Lockout expired, reset state completely
                 state.attempts.clear();
                 state.lockout_until = None;
             }
@@ -77,16 +77,10 @@ impl RateLimiter {
         let window_start = now - self.config.window_duration;
         state.attempts.retain(|&t| t > window_start);
 
-        // Check if max attempts exceeded
+        // Check if max attempts exceeded BEFORE recording new attempt
         if state.attempts.len() as u32 >= self.config.max_attempts {
             state.lockout_until = Some(now + self.config.lockout_duration);
             return Err(RateLimitError::LockedOut(self.config.lockout_duration));
-        }
-
-        // Warn if approaching max attempts (more than 75% of limit)
-        let warning_threshold = (self.config.max_attempts as f32 * 0.75) as usize;
-        if state.attempts.len() >= warning_threshold {
-            return Err(RateLimitError::TooManyAttempts);
         }
 
         // Record this attempt
@@ -123,7 +117,6 @@ impl RateLimiter {
 #[derive(Debug, Clone)]
 pub enum RateLimitError {
     LockedOut(Duration),
-    TooManyAttempts,
 }
 
 impl std::fmt::Display for RateLimitError {
@@ -135,9 +128,6 @@ impl std::fmt::Display for RateLimitError {
                     "Too many attempts. Try again in {:.0}s",
                     remaining.as_secs_f64()
                 )
-            }
-            RateLimitError::TooManyAttempts => {
-                write!(f, "Too many attempts. Please wait before trying again.")
             }
         }
     }
@@ -246,12 +236,17 @@ mod tests {
 
         let limiter = RateLimiter::new(config);
 
+        // First attempt - should succeed
         limiter.check_rate_limit("userD").unwrap();
 
+        // Wait for window to expire
         thread::sleep(Duration::from_millis(600));
 
+        // Second attempt - should succeed (window expired)
         limiter.check_rate_limit("userD").unwrap();
 
-        assert!(limiter.check_rate_limit("userD").is_ok());
+        // Third attempt - should succeed (only 1 attempt in current window)
+        let result = limiter.check_rate_limit("userD");
+        assert!(result.is_ok(), "Third attempt should succeed: {:?}", result);
     }
 }

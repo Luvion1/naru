@@ -555,9 +555,6 @@ fn get_encryption_key() -> Result<[u8; 32], PersistenceError> {
 
     if let Err(e) = rate_limiter.check_rate_limit(&identifier) {
         let error_msg = match e {
-            RateLimitError::TooManyAttempts => {
-                format!("Too many attempts ({}). Consider stopping for a while.", e)
-            }
             RateLimitError::LockedOut(_) => {
                 format!("Rate limit exceeded: {}. Too many decryption attempts.", e)
             }

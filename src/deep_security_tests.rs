@@ -41,7 +41,7 @@ mod deep_security_tests {
         let encrypted = crate::core::crypto::encrypt_data(correct_data, &key).unwrap();
 
         // Test dengan ciphertext yang dimodifikasi
-        let mut tampered = hex::decode(&encrypted).unwrap();
+        let tampered = hex::decode(&encrypted).unwrap();
 
         // Modifikasi 1 byte di posisi berbeda
         let mut timings = Vec::new();
@@ -260,7 +260,7 @@ mod deep_security_tests {
         crate::core::persistence::init_project().unwrap();
 
         // Acquire lock in one thread
-        let lock_path = temp_dir
+        let _lock_path = temp_dir
             .path()
             .join(crate::core::constants::NARU_DIR)
             .join("config.json.lock");

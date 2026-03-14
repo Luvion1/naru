@@ -4,7 +4,6 @@
 #[cfg(test)]
 mod penetration_tests {
     use std::fs;
-    use std::path::Path;
     use std::sync::{Arc, Barrier};
     use std::thread;
     use std::time::Instant;
@@ -252,7 +251,7 @@ mod penetration_tests {
 
         // Try to inject malicious content via key name
         let malicious_key = "KEY\n{\"injected\": true}";
-        let set_output = std::process::Command::new("./target/release/naru")
+        let _set_output = std::process::Command::new("./target/release/naru")
             .args([
                 "set",
                 &format!("{}=test_value", malicious_key),

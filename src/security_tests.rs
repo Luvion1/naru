@@ -3,7 +3,6 @@
 #[cfg(test)]
 mod security_tests {
     use std::fs;
-    use std::io::Write;
     use tempfile::TempDir;
 
     #[test]
