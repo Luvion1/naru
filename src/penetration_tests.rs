@@ -6,7 +6,6 @@ mod penetration_tests {
     use std::fs;
     use std::sync::{Arc, Barrier};
     use std::thread;
-    use std::time::Instant;
     use tempfile::TempDir;
 
     // ========================================================================
