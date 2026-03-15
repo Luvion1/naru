@@ -1,5 +1,9 @@
 # 🏗️ Naru Architecture
 
+**Project Status:** Production-ready (v0.6.0)  
+**Rust Edition:** 2021  
+**License:** MIT  
+
 Naru is built with a modular, **Domain-Driven Design (DDD)** inspired architecture. It prioritizes the separation of concerns between data models, business logic, and persistence layers.
 
 ## 🧱 Layered Overview

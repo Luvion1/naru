@@ -1,5 +1,8 @@
 # 💻 CLI Guide
 
+**Version:** 0.6.0  
+**Install:** `cargo install naru-config`  
+
 This guide provides a comprehensive reference for all Naru commands and their options.
 
 ## 🏁 Project Initialization

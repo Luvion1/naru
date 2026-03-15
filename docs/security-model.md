@@ -1,5 +1,8 @@
 # 🛡️ Security Model
 
+**Version:** 0.6.0  
+**Last Updated:** 2026-03-15  
+
 Naru is designed with a **Zero-Trust** philosophy. This document outlines the cryptographic standards and safety measures implemented to protect your sensitive data.
 
 ## 🔑 Cryptography

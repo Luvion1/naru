@@ -6,13 +6,13 @@
 
 ### *Securing the Backbone of Modern Applications*
 
-[![Rust 2024](https://img.shields.io/badge/Rust-2024-orange?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
+[![Rust 2021](https://img.shields.io/badge/Rust-2021-orange?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
 [![AES-256-GCM](https://img.shields.io/badge/Security-AES--256--GCM-green?style=for-the-badge)](docs/security-model.md)
 [![Audit Chained](https://img.shields.io/badge/Audit-Hash--Chained-blue?style=for-the-badge)](docs/audit-system.md)
 [![Tests](https://img.shields.io/badge/Tests-257%20passed-brightgreen?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 
-**Naru** is an industrial-grade, security-first configuration engine. Built with the speed and safety of Rust, it provides a tamper-evident, schema-enforced ecosystem for managing application secrets and environment variables in high-stakes production environments.
+**Naru** (naru-config) is an industrial-grade, security-first configuration engine. Built with Rust 2021 edition, it provides a tamper-evident, schema-enforced ecosystem for managing application secrets and environment variables in high-stakes production environments.
 
 [**Explore Documentation**](docs/cli-guide.md) • [**Report an Issue**](https://github.com/Luvion1/naru/issues) • [**Request a Feature**](https://github.com/Luvion1/naru/issues)
 
@@ -34,8 +34,16 @@
 ## 🚀 Getting Started in 3 Steps
 
 ### 1. Installation
-Build the binary optimized for your architecture:
+
+**From crates.io:**
 ```bash
+cargo install naru-config
+```
+
+**From source:**
+```bash
+git clone https://github.com/Luvion1/naru.git
+cd naru
 cargo build --release --locked
 sudo cp target/release/naru /usr/local/bin/
 ```
