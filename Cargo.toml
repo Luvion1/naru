@@ -2,7 +2,12 @@
 name = "naru"
 version = "0.6.0"
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/Luvion1/naru"
 description = "A security-first configuration manager with encryption and audit logging"
+documentation = "https://github.com/Luvion1/naru/tree/master/docs"
+keywords = ["config", "encryption", "security", "aes", "cli"]
+categories = ["command-line-utilities", "cryptography"]
 
 [dependencies]
 anyhow = "1.0.100"
