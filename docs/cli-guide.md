@@ -70,3 +70,25 @@ Encrypts a standalone file using the project's master key.
 
 ### `naru crypto decrypt <INPUT> <OUTPUT>`
 Decrypts a previously encrypted file.
+
+## 🧪 Testing & Development
+
+### Running Tests
+```bash
+# Run all tests
+cargo test
+
+# Run specific test suites
+cargo test penetration_tests    # Penetration testing suite
+cargo test security_tests       # Security validation tests
+cargo test deep_security_tests  # Advanced security analysis
+
+# Run tests with output
+cargo test -- --nocapture
+```
+
+### Test Coverage
+- **257 tests** covering all security aspects
+- **Penetration tests** - 8 exploit scenarios
+- **Security tests** - Encryption, validation, path traversal
+- **Deep security analysis** - Race conditions, DoS, info leaks

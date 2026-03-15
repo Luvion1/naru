@@ -35,14 +35,19 @@ graph TD
 
 ```text
 src/
-├── main.rs          # Application Entry Point & Command Dispatcher
-├── cli/             # CLI Parser & Subcommand Definitions
-└── core/            # Domain Logic (The "Brain" of Naru)
-    ├── audit.rs     # Hash-chained logging system
-    ├── crypto.rs    # Encryption primitives (AES-256-GCM)
-    ├── persistence.rs # File handling & Import/Export logic
-    ├── schema.rs    # Schema management logic
-    └── security.rs  # Input sanitization & Path safety
+├── main.rs              # Application Entry Point & Command Dispatcher
+├── cli/                 # CLI Parser & Subcommand Definitions
+├── core/                # Domain Logic (The "Brain" of Naru)
+│   ├── audit.rs         # Hash-chained logging system
+│   ├── crypto.rs        # Encryption primitives (AES-256-GCM)
+│   ├── persistence.rs   # File handling & Import/Export logic
+│   ├── schema.rs        # Schema management logic
+│   ├── security.rs      # Input sanitization & Path safety
+│   ├── validation.rs    # Value validation against schema rules
+│   ├── locking.rs       # File locking for thread safety
+│   └── rate_limiter.rs  # Rate limiting for security
+├── penetration_tests.rs # Penetration testing suite (8 exploits)
+└── deep_security_tests.rs # Advanced security analysis tests
 ```
 
 ## 🔄 Lifecycle of a Command
@@ -53,3 +58,27 @@ src/
 5. **Log**: An `AuditLogEntry` is generated and chained to the previous entry's hash.
 6. **Save**: The new state is written back to disk.
 7. **Unlock**: The file lock is released.
+
+## 🧪 Testing Architecture
+
+Naru includes a comprehensive testing suite with 257+ tests:
+
+### Test Categories
+- **Unit Tests** - Individual function validation
+- **Integration Tests** - End-to-end workflow testing
+- **Security Tests** - Encryption, validation, path traversal
+- **Penetration Tests** - Exploit simulation and vulnerability detection
+- **Deep Security Analysis** - Advanced attack vector testing
+
+### Test Files
+- `src/core/*.rs` - Module-level unit tests
+- `src/security_tests.rs` - Security validation tests
+- `src/penetration_tests.rs` - 8 penetration test scenarios
+- `src/deep_security_tests.rs` - Advanced security analysis
+
+### Running Tests
+```bash
+cargo test                  # Run all tests
+cargo test -- --nocapture   # Run with output
+cargo test penetration      # Run penetration tests only
+```

@@ -2,17 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.6.0] - 2026-03-13
+## [0.6.0] - 2026-03-15
 ### Added
 - Path traversal protection with Unicode normalization
 - Argon2 key derivation for enhanced security
 - Rate limiting for decryption operations
 - Internal `sanitize_file_path_internal` for test compatibility
+- Comprehensive penetration testing suite (8 exploit scenarios)
+- Deep security analysis tests (race conditions, DoS, info leaks)
 
 ### Fixed
+- **CRITICAL**: Fixed 10 failing tests in penetration and security test suites
 - Removed unused `TooManyAttempts` variant from `RateLimitError`
 - Dead code cleanup in test files
 - Clippy warnings and formatting issues
+- Race condition test failures with proper error handling
+- Directory traversal test false positives
+- Schema test edge cases with many fields
+
+### Test Improvements
+- Replaced binary command calls with direct API calls for reliability
+- Added proper `NARU_ENCRYPTION_KEY` setup for integration tests
+- Fixed directory cleanup to prevent use-after-move errors
+- Implemented safe option chaining pattern across all tests
+- Test result: 257 passed, 0 failed (was: 247 passed, 10 failed)
 
 ## [0.5.0] - 2026-03-13
 ### Security
