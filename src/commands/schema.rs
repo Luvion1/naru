@@ -60,10 +60,12 @@ pub fn execute_remove(cmd: SchemaRemoveCommand) -> Result<()> {
         key
     } else {
         let schema: SchemaFile =
-            persistence::load_json(SCHEMA_FILE).unwrap_or_else(|_| SchemaFile {
-                version: "1.0".to_string(),
-                fields: vec![],
-            });
+            persistence::atomic_read_json(SCHEMA_FILE, |s: &SchemaFile| s.clone()).unwrap_or_else(
+                |_| SchemaFile {
+                    version: "1.0".to_string(),
+                    fields: vec![],
+                },
+            );
         interactive::prompt_select_field(&schema)?
     };
 
@@ -79,13 +81,14 @@ pub fn execute_remove(cmd: SchemaRemoveCommand) -> Result<()> {
 }
 
 pub fn execute_view() -> Result<()> {
-    let schema: SchemaFile = persistence::load_json(SCHEMA_FILE).unwrap_or_else(|_| {
-        eprintln!("Warning: Could not load schema file, using default schema");
-        SchemaFile {
-            version: "1.0".to_string(),
-            fields: vec![],
-        }
-    });
+    let schema: SchemaFile = persistence::atomic_read_json(SCHEMA_FILE, |s: &SchemaFile| s.clone())
+        .unwrap_or_else(|_| {
+            eprintln!("Warning: Could not load schema file, using default schema");
+            SchemaFile {
+                version: "1.0".to_string(),
+                fields: vec![],
+            }
+        });
 
     println!("Schema version: {}", schema.version);
     if schema.fields.is_empty() {
@@ -105,8 +108,8 @@ pub fn execute_view() -> Result<()> {
 }
 
 pub fn execute_edit(cmd: SchemaEditCommand) -> Result<()> {
-    let schema: SchemaFile =
-        persistence::load_json(SCHEMA_FILE).map_err(|e| anyhow!("Failed to load schema: {}", e))?;
+    let schema: SchemaFile = persistence::atomic_read_json(SCHEMA_FILE, |s: &SchemaFile| s.clone())
+        .map_err(|e| anyhow!("Failed to load schema: {}", e))?;
 
     let key = if let Some(key) = cmd.key {
         key

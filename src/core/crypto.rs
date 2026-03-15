@@ -38,41 +38,49 @@ pub fn derive_key_secure(
 
 pub fn is_key_too_weak(key: &[u8; 32]) -> bool {
     use std::collections::HashSet;
-    
+
     // Check 1: Too few unique bytes (entropy check)
     let unique_bytes = key.iter().collect::<HashSet<_>>().len();
     if unique_bytes < 8 {
         return true;
     }
-    
+
     // Check 2: All bytes the same
     if key.iter().all(|&b| b == key[0]) {
         return true;
     }
-    
+
     // Check 3: Sequential pattern (0,1,2,3... or 255,254,253...)
-    let is_sequential_asc = key.iter().enumerate().all(|(i, &b)| b as i16 == (key[0] as i16 + i as i16) % 256);
-    let is_sequential_desc = key.iter().enumerate().all(|(i, &b)| b as i16 == (key[0] as i16 - i as i16).wrapping_rem(256));
+    let is_sequential_asc = key
+        .iter()
+        .enumerate()
+        .all(|(i, &b)| b as i16 == (key[0] as i16 + i as i16) % 256);
+    let is_sequential_desc = key
+        .iter()
+        .enumerate()
+        .all(|(i, &b)| b as i16 == (key[0] as i16 - i as i16).wrapping_rem(256));
     if is_sequential_asc || is_sequential_desc {
         return true;
     }
-    
+
     // Check 4: Alternating pattern (like 0xAA, 0x55, 0xAA, 0x55...)
     if key.len() >= 4 {
         let alternating_two = key[0] == key[2] && key[1] == key[3] && key[0] != key[1];
-        let all_alternating = key.windows(2).all(|w| w[0] == key[0] && w[1] == key[1] || w[0] == key[1] && w[1] == key[0]);
+        let all_alternating = key
+            .windows(2)
+            .all(|w| w[0] == key[0] && w[1] == key[1] || w[0] == key[1] && w[1] == key[0]);
         if alternating_two && all_alternating {
             return true;
         }
     }
-    
+
     // Check 5: Half zeros or half 0xFF
     let zeros = key.iter().filter(|&&b| b == 0).count();
     let ones = key.iter().filter(|&&b| b == 0xFF).count();
     if zeros > 24 || ones > 24 {
         return true;
     }
-    
+
     false
 }
 
@@ -146,7 +154,7 @@ pub fn decrypt_data(
     let mut plaintext = Zeroizing::new(plaintext_bytes);
     let result = String::from_utf8(plaintext.to_vec());
     plaintext.zeroize();
-    
+
     Ok(result?)
 }
 

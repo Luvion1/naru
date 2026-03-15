@@ -11,10 +11,14 @@ static GLOBAL_LOCK: Mutex<()> = Mutex::new(());
 /// Represents a file lock using OS-level advisory locks
 pub struct FileLock {
     _file: Option<File>,
-    pub path: std::path::PathBuf,
+    path: std::path::PathBuf,
 }
 
 impl FileLock {
+    pub fn path(&self) -> &std::path::PathBuf {
+        &self.path
+    }
+
     /// Acquire an exclusive lock on a file
     /// First acquires a global lock to prevent all concurrent access,
     /// then acquires a file-specific lock
@@ -61,7 +65,8 @@ impl Drop for FileLock {
         if let Some(ref file) = self._file {
             let _ = file.unlock();
         }
-        // Don't delete the lock file - just unlock
+        // Clean up the lock file
+        let _ = std::fs::remove_file(&self.path);
     }
 }
 
@@ -107,7 +112,7 @@ mod tests {
 
         for _ in 0..10 {
             let lock = FileLock::acquire_exclusive(&target_file).unwrap();
-            assert!(lock.path.exists());
+            assert!(lock.path().exists());
             drop(lock);
             assert!(!target_file.with_extension("lock").exists());
         }
@@ -120,7 +125,7 @@ mod tests {
 
         let lock = FileLock::acquire_exclusive(&target_file)
             .expect("Should acquire lock with special chars in filename");
-        assert!(lock.path.exists());
+        assert!(lock.path().exists());
         drop(lock);
         assert!(!target_file.with_extension("lock").exists());
     }
@@ -132,7 +137,7 @@ mod tests {
 
         let lock = FileLock::acquire_exclusive(&target_file)
             .expect("Should acquire lock with unicode in filename");
-        assert!(lock.path.exists());
+        assert!(lock.path().exists());
         drop(lock);
         assert!(!target_file.with_extension("lock").exists());
     }
@@ -145,7 +150,7 @@ mod tests {
 
         let lock = FileLock::acquire_exclusive(&target_file)
             .expect("Should acquire lock with long filename");
-        assert!(lock.path.exists());
+        assert!(lock.path().exists());
         drop(lock);
         assert!(!target_file.with_extension("lock").exists());
     }
@@ -163,7 +168,7 @@ mod tests {
 
         let lock =
             FileLock::acquire_exclusive(&target_file).expect("Should acquire lock in deep nesting");
-        assert!(lock.path.exists());
+        assert!(lock.path().exists());
         drop(lock);
         assert!(!target_file.with_extension("lock").exists());
     }
@@ -178,7 +183,7 @@ mod tests {
         // we'll just test that the lock file creation works normally
         let lock = FileLock::acquire_exclusive(&target_file)
             .expect("Should acquire lock regardless of original file permissions");
-        assert!(lock.path.exists());
+        assert!(lock.path().exists());
         drop(lock);
         assert!(!target_file.with_extension("lock").exists());
     }
@@ -218,7 +223,7 @@ mod tests {
 
         // Acquire a new lock - this should overwrite/create a new lock file
         let lock = FileLock::acquire_exclusive(&target_file).unwrap();
-        assert!(lock.path.exists());
+        assert!(lock.path().exists());
 
         // Clean up
         drop(lock);
@@ -232,7 +237,7 @@ mod tests {
 
         {
             let lock = FileLock::acquire_exclusive(&target_file).unwrap();
-            let lock_path = lock.path.clone();
+            let lock_path = lock.path().clone();
             assert!(lock_path.exists());
             // lock goes out of scope here
         }

@@ -15,62 +15,61 @@ pub fn add_field(field: FieldDefinition) -> Result<()> {
         ));
     }
 
-    let mut schema: SchemaFile =
-        persistence::load_json(SCHEMA_FILE).unwrap_or_else(|_| SchemaFile {
-            version: "1.0".to_string(),
-            fields: vec![],
-        });
-
-    if schema.fields.iter().any(|f| f.key == field.key) {
-        return Err(anyhow::anyhow!(
-            "Field '{}' already exists in schema",
-            field.key
-        ));
-    }
-
     let key = field.key.clone();
-    schema.fields.push(field);
-    persistence::save_json(SCHEMA_FILE, &schema)?;
+    persistence::atomic_update_json(SCHEMA_FILE, |schema: &mut SchemaFile| {
+        if schema.fields.iter().any(|f| f.key == key) {
+            return Err(persistence::PersistenceError::ValidationError(format!(
+                "Field '{}' already exists in schema",
+                key
+            )));
+        }
+        schema.fields.push(field);
+        Ok(())
+    })?;
+
     println!("Field '{}' added to schema.", key);
     Ok(())
 }
 
 /// Menghapus field dari skema
 pub fn remove_field(key: &str) -> Result<()> {
-    let mut schema: SchemaFile =
-        persistence::load_json(SCHEMA_FILE).unwrap_or_else(|_| SchemaFile {
-            version: "1.0".to_string(),
-            fields: vec![],
-        });
+    persistence::atomic_update_json(SCHEMA_FILE, |schema: &mut SchemaFile| {
+        let initial_len = schema.fields.len();
+        schema.fields.retain(|f| f.key != key);
 
-    let initial_len = schema.fields.len();
-    schema.fields.retain(|f| f.key != key);
+        if schema.fields.len() == initial_len {
+            return Err(persistence::PersistenceError::IoError {
+                source: std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("Field '{}' not found in schema", key),
+                ),
+            });
+        }
+        Ok(())
+    })?;
 
-    if schema.fields.len() == initial_len {
-        return Err(anyhow::anyhow!("Field '{}' not found in schema", key));
-    }
-
-    persistence::save_json(SCHEMA_FILE, &schema)?;
     println!("Field '{}' removed from schema.", key);
     Ok(())
 }
 
 /// Memperbarui field di skema
 pub fn update_field(key: &str, updated_field: FieldDefinition) -> Result<()> {
-    let mut schema: SchemaFile =
-        persistence::load_json(SCHEMA_FILE).unwrap_or_else(|_| SchemaFile {
-            version: "1.0".to_string(),
-            fields: vec![],
-        });
+    persistence::atomic_update_json(SCHEMA_FILE, |schema: &mut SchemaFile| {
+        if let Some(field) = schema.fields.iter_mut().find(|f| f.key == key) {
+            *field = updated_field;
+            Ok(())
+        } else {
+            Err(persistence::PersistenceError::IoError {
+                source: std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("Field '{}' not found in schema", key),
+                ),
+            })
+        }
+    })?;
 
-    if let Some(field) = schema.fields.iter_mut().find(|f| f.key == key) {
-        *field = updated_field;
-        persistence::save_json(SCHEMA_FILE, &schema)?;
-        println!("Field '{}' updated in schema.", key);
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!("Field '{}' not found in schema", key))
-    }
+    println!("Field '{}' updated in schema.", key);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -117,7 +116,8 @@ mod tests {
         })
         .unwrap();
 
-        let schema: SchemaFile = persistence::load_json(SCHEMA_FILE).unwrap();
+        let schema: SchemaFile =
+            persistence::atomic_read_json(SCHEMA_FILE, |s: &SchemaFile| s.clone()).unwrap();
         assert_eq!(schema.fields.len(), 1);
         assert_eq!(schema.fields[0].key, "test_key");
 
@@ -134,7 +134,8 @@ mod tests {
         )
         .unwrap();
 
-        let schema: SchemaFile = persistence::load_json(SCHEMA_FILE).unwrap();
+        let schema: SchemaFile =
+            persistence::atomic_read_json(SCHEMA_FILE, |s: &SchemaFile| s.clone()).unwrap();
         assert_eq!(schema.fields[0].r#type, "integer");
         assert_eq!(
             schema.fields[0].description,
@@ -143,7 +144,8 @@ mod tests {
 
         // 3. Test Remove
         remove_field("test_key").unwrap();
-        let schema: SchemaFile = persistence::load_json(SCHEMA_FILE).unwrap();
+        let schema: SchemaFile =
+            persistence::atomic_read_json(SCHEMA_FILE, |s: &SchemaFile| s.clone()).unwrap();
         assert_eq!(schema.fields.len(), 0);
     }
 
@@ -168,7 +170,8 @@ mod tests {
         // Let's check if it gets added to the schema
         assert!(result.is_ok());
 
-        let schema: SchemaFile = persistence::load_json(SCHEMA_FILE).unwrap();
+        let schema: SchemaFile =
+            persistence::atomic_read_json(SCHEMA_FILE, |s: &SchemaFile| s.clone()).unwrap();
         // Even though add_field succeeded, the key validation should happen elsewhere
         // Actually, let's check if it was added
         assert!(schema.fields.iter().any(|f| f.key == "🚀_key"));
@@ -222,7 +225,7 @@ mod tests {
     fn test_update_nonexistent_field() {
         let temp_dir = TempDir::new().unwrap();
         let _guard = TestDirGuard::new(temp_dir.path());
-        
+
         if persistence::init_project().is_err() {
             // If init fails, skip this test
             return;
@@ -249,7 +252,7 @@ mod tests {
     fn test_schema_with_many_fields() {
         let temp_dir = TempDir::new().unwrap();
         let _guard = TestDirGuard::new(temp_dir.path());
-        
+
         if persistence::init_project().is_err() {
             // If init fails, skip this test
             return;
@@ -263,17 +266,20 @@ mod tests {
                 description: Some(format!("Description for field {}", i)),
                 validation: None,
                 is_secret: i % 2 == 0, // Alternate secret flag
-            }).is_err() {
+            })
+            .is_err()
+            {
                 // If adding field fails, skip rest of test
                 return;
             }
         }
 
-        let schema: SchemaFile = match persistence::load_json(SCHEMA_FILE) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-        
+        let schema: SchemaFile =
+            match persistence::atomic_read_json(SCHEMA_FILE, |s: &SchemaFile| s.clone()) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+
         assert_eq!(schema.fields.len(), 100);
 
         // Verify we can retrieve them all
@@ -311,7 +317,8 @@ mod tests {
 
         add_field(field_with_validation.clone()).unwrap();
 
-        let schema: SchemaFile = persistence::load_json(SCHEMA_FILE).unwrap();
+        let schema: SchemaFile =
+            persistence::atomic_read_json(SCHEMA_FILE, |s: &SchemaFile| s.clone()).unwrap();
         let retrieved_field = schema
             .fields
             .iter()
@@ -351,7 +358,8 @@ mod tests {
             .unwrap();
         }
 
-        let schema: SchemaFile = persistence::load_json(SCHEMA_FILE).unwrap();
+        let schema: SchemaFile =
+            persistence::atomic_read_json(SCHEMA_FILE, |s: &SchemaFile| s.clone()).unwrap();
         assert_eq!(schema.fields.len(), 3);
 
         for (i, expected_type) in types_to_test.iter().enumerate() {
@@ -381,7 +389,8 @@ mod tests {
         })
         .unwrap();
 
-        let schema: SchemaFile = persistence::load_json(SCHEMA_FILE).unwrap();
+        let schema: SchemaFile =
+            persistence::atomic_read_json(SCHEMA_FILE, |s: &SchemaFile| s.clone()).unwrap();
         let field = schema
             .fields
             .iter()

@@ -165,6 +165,9 @@ fn main() -> Result<()> {
                 commands::template::template_list()?;
             }
         },
+        cli::parser::Commands::Search { query, env, values } => {
+            commands::search::SearchCommand::new(query, env, values).execute()?;
+        }
     }
 
     Ok(())

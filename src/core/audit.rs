@@ -138,7 +138,7 @@ impl AuditLogEntry {
         let max_retries = 5;
         let mut last_error: Option<std::io::Error> = None;
         let mut acquired_lock = None;
-        
+
         for attempt in 0..max_retries {
             match locking::FileLock::acquire_exclusive(&lock_path) {
                 Ok(lock) => {
@@ -153,10 +153,10 @@ impl AuditLogEntry {
                 }
             }
         }
-        
+
         if acquired_lock.is_none() {
             return Err(Box::new(std::io::Error::other(format!(
-                "Could not acquire audit lock after {} attempts: {:?}", 
+                "Could not acquire audit lock after {} attempts: {:?}",
                 max_retries, last_error
             ))));
         }
@@ -165,35 +165,35 @@ impl AuditLogEntry {
         {
             let _lock = acquired_lock.unwrap();
 
-        // Get the previous hash from the last line of the file
-        let prev_hash = if Path::new(&sanitized_log_path).exists() {
-            let file = fs::File::open(&sanitized_log_path)?;
-            let reader = std::io::BufReader::new(file);
-            if let Some(last_line) = reader.lines().map_while(Result::ok).last() {
-                if let Ok(last_entry) = serde_json::from_str::<AuditLogEntry>(&last_line) {
-                    last_entry.hash
+            // Get the previous hash from the last line of the file
+            let prev_hash = if Path::new(&sanitized_log_path).exists() {
+                let file = fs::File::open(&sanitized_log_path)?;
+                let reader = std::io::BufReader::new(file);
+                if let Some(last_line) = reader.lines().map_while(Result::ok).last() {
+                    if let Ok(last_entry) = serde_json::from_str::<AuditLogEntry>(&last_line) {
+                        last_entry.hash
+                    } else {
+                        None
+                    }
                 } else {
-                    None
+                    None // File exists but is empty
                 }
             } else {
-                None // File exists but is empty
-            }
-        } else {
-            None // File does not exist (genesis)
-        };
+                None // File does not exist (genesis)
+            };
 
-        self.previous_hash = prev_hash.or_else(|| {
-            Some("0000000000000000000000000000000000000000000000000000000000000000".to_string())
-        });
-        self.hash = Some(self.calculate_hash());
+            self.previous_hash = prev_hash.or_else(|| {
+                Some("0000000000000000000000000000000000000000000000000000000000000000".to_string())
+            });
+            self.hash = Some(self.calculate_hash());
 
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&sanitized_log_path)?;
+            let mut file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&sanitized_log_path)?;
 
-        let log_line = serde_json::to_string(self)?;
-        writeln!(file, "{}", log_line)?;
+            let log_line = serde_json::to_string(self)?;
+            writeln!(file, "{}", log_line)?;
         } // Lock automatically released when _lock goes out of scope
 
         Ok(())

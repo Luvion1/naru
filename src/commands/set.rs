@@ -33,13 +33,16 @@ impl SetCommand {
         security::validate_config_key(&self.key)
             .map_err(|e| anyhow!("Invalid config key: {}", e))?;
 
-        let schema: SchemaFile = persistence::load_json(SCHEMA_FILE).unwrap_or_else(|_| {
-            eprintln!("Warning: Could not load schema file, using default schema");
-            SchemaFile {
-                version: "1.0".to_string(),
-                fields: vec![],
-            }
-        });
+        let schema: SchemaFile =
+            persistence::atomic_read_json(SCHEMA_FILE, |s: &SchemaFile| s.clone()).unwrap_or_else(
+                |_| {
+                    eprintln!("Warning: Could not load schema file, using default schema");
+                    SchemaFile {
+                        version: "1.0".to_string(),
+                        fields: vec![],
+                    }
+                },
+            );
 
         let mut target_type = "string".to_string();
         let mut is_secret = self.secret;

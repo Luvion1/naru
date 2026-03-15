@@ -11,6 +11,7 @@ pub mod import;
 pub mod init;
 pub mod list;
 pub mod schema;
+pub mod search;
 pub mod set;
 pub mod template;
 pub mod validate;

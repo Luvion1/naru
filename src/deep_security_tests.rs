@@ -142,7 +142,7 @@ mod deep_security_tests {
         std::env::set_current_dir(&temp_dir).unwrap();
 
         unsafe { std::env::set_var("NARU_ENCRYPTION_KEY", "test_key_for_race") };
-        
+
         if let Err(e) = crate::core::persistence::init_project() {
             println!("  Init failed: {:?}\n", e);
             let _ = std::env::set_current_dir(&original_dir);
@@ -216,7 +216,7 @@ mod deep_security_tests {
         std::env::set_current_dir(&temp_dir).unwrap();
 
         unsafe { std::env::set_var("NARU_ENCRYPTION_KEY", "test_key_for_race_new") };
-        
+
         if let Err(e) = crate::core::persistence::init_project() {
             println!("  Init failed: {:?}\n", e);
             let _ = std::env::set_current_dir(&original_dir);
@@ -247,13 +247,15 @@ mod deep_security_tests {
         let results: Vec<bool> = handles.into_iter().map(|h| h.join().unwrap()).collect();
         let success_count = results.iter().filter(|&&r| r).count();
 
-        let entry_count = crate::core::persistence::load_json(crate::core::constants::CONFIG_FILE)
-            .ok()
-            .and_then(|config: crate::core::models::ConfigFile| {
-                config.environments.get("development")
-                    .map(|e| e.entries.len())
-            })
-            .unwrap_or(0);
+        let entry_count = crate::core::persistence::atomic_read_config(|config| {
+            config
+                .environments
+                .get("development")
+                .map(|e| e.entries.len())
+        })
+        .ok()
+        .flatten()
+        .unwrap_or(0);
 
         println!(
             "  NEW API - Concurrent writes: {}/10 succeeded",
@@ -298,7 +300,7 @@ mod deep_security_tests {
         )
         .unwrap();
 
-        println!("  Lock acquired: {:?}", lock.path.exists());
+        println!("  Lock acquired: {:?}", lock.path().exists());
 
         // Try to acquire same lock in main thread (should block)
         let start = Instant::now();
@@ -383,7 +385,7 @@ mod deep_security_tests {
         std::env::set_current_dir(&temp_dir).unwrap();
 
         unsafe { std::env::set_var("NARU_ENCRYPTION_KEY", "test_key_for_audit_log") };
-        
+
         if let Err(e) = crate::core::persistence::init_project() {
             println!("  Init failed: {:?}\n", e);
             let _ = std::env::set_current_dir(&original_dir);
@@ -392,24 +394,15 @@ mod deep_security_tests {
         }
 
         // Add a secret value
-        let mut config: crate::core::models::ConfigFile =
-            match crate::core::persistence::load_json(crate::core::constants::CONFIG_FILE) {
-                Ok(c) => c,
-                Err(_) => {
-                    let _ = std::env::set_current_dir(&original_dir);
-                    unsafe { std::env::remove_var("NARU_ENCRYPTION_KEY") };
-                    return;
-                }
-            };
-
-        if let Some(env_config) = config.environments.get_mut("development") {
-            env_config.entries.insert(
-                "DB_PASSWORD".to_string(),
-                crate::core::models::ConfigValueEntry::new("super_secret_123", "string", true),
-            );
-        }
-
-        let _ = crate::core::persistence::save_json(crate::core::constants::CONFIG_FILE, &config);
+        let _ = crate::core::persistence::atomic_update_config(|config| {
+            if let Some(env_config) = config.environments.get_mut("development") {
+                env_config.entries.insert(
+                    "DB_PASSWORD".to_string(),
+                    crate::core::models::ConfigValueEntry::new("super_secret_123", "string", true),
+                );
+            }
+            Ok(())
+        });
 
         // Check audit log
         let audit_path = temp_dir

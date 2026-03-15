@@ -1,4 +1,4 @@
-use crate::core::constants::{CONFIG_FILE, SCHEMA_FILE};
+use crate::core::constants::SCHEMA_FILE;
 use crate::core::models::{ConfigFile, SchemaFile};
 use crate::core::persistence;
 use anyhow::{anyhow, Result};
@@ -11,11 +11,12 @@ impl ValidateCommand {
     }
 
     pub fn execute(&self) -> Result<()> {
-        let config: ConfigFile = persistence::load_json(CONFIG_FILE)
+        let config: ConfigFile = persistence::atomic_read_config(|c| c.clone())
             .map_err(|e| anyhow!("Failed to load config: {}. Run 'naru init' first.", e))?;
 
-        let schema: SchemaFile = persistence::load_json(SCHEMA_FILE)
-            .map_err(|e| anyhow!("Failed to load schema: {}", e))?;
+        let schema: SchemaFile =
+            persistence::atomic_read_json(SCHEMA_FILE, |s: &SchemaFile| s.clone())
+                .map_err(|e| anyhow!("Failed to load schema: {}", e))?;
 
         println!("\nValidating configuration against schema...");
         let mut errors = 0;

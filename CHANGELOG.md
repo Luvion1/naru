@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.3] - 2026-03-15
+### Added
+- **Search Command**: New `naru search <query>` command to find configuration keys and values across environments
+  - Filter by environment with `--env <name>`
+  - Show values in results with `--values` flag
+
+### Bug Fixes
+- **FileLock Cleanup**: Fixed lock file not being deleted after release in `Drop` implementation
+- **FileLock Access**: Made `path` field private with getter method for better encapsulation
+- **Unused Imports**: Cleaned up unused imports across command modules
+- **Deprecated Functions**: Added `#[allow(dead_code)]` to suppress warnings for deprecated `save_json`/`load_json`
+
+### Improvements
+- Clean build with zero warnings
+- Enhanced atomic operations for concurrent safety
+
 ## [0.6.2] - 2026-03-15
 ### Bug Fixes
 - **Race Condition**: Fixed data loss during concurrent writes by adding global mutex lock in `locking.rs`

@@ -1,5 +1,5 @@
 use crate::core::audit;
-use crate::core::constants::{CONFIG_FILE, NARU_DIR, SCHEMA_FILE};
+use crate::core::constants::{NARU_DIR, SCHEMA_FILE};
 use crate::core::models::{BackupData, ConfigFile, SchemaFile};
 use crate::core::persistence;
 use anyhow::{anyhow, Result};
@@ -19,7 +19,11 @@ pub fn execute_create(cmd: BackupCreateCommand) -> Result<()> {
     } else if cmd.file_path.ends_with(".tar.gz") || cmd.file_path.ends_with(".tgz") {
         // User specified tar.gz but we write JSON - warn and change extension
         eprintln!("Warning: Backup format is JSON, not tar.gz. Using .json extension.");
-        cmd.file_path.trim_end_matches(".tar.gz").trim_end_matches(".tgz").to_string() + ".json"
+        cmd.file_path
+            .trim_end_matches(".tar.gz")
+            .trim_end_matches(".tgz")
+            .to_string()
+            + ".json"
     } else {
         // Add .json extension if no known extension
         cmd.file_path + ".json"
@@ -28,22 +32,25 @@ pub fn execute_create(cmd: BackupCreateCommand) -> Result<()> {
     let sanitized_path = crate::core::security::sanitize_file_path(&file_path)
         .map_err(|e| anyhow!("Invalid file path: {}", e))?;
 
-    let mut config: ConfigFile = persistence::load_json(CONFIG_FILE)
-        .map_err(|e| anyhow!("Failed to load config: {}. Run 'naru init' first.", e))?;
+    let schema: SchemaFile = persistence::atomic_read_json(SCHEMA_FILE, |s: &SchemaFile| s.clone())
+        .unwrap_or_else(|_| {
+            eprintln!("Warning: Could not load schema file, using default schema");
+            SchemaFile {
+                version: "1.0".to_string(),
+                fields: vec![],
+            }
+        });
 
-    for env_config in config.environments.values_mut() {
-        env_config
-            .entries
-            .retain(|_, entry| !entry.is_secret || !entry.encrypted);
-    }
-
-    let schema: SchemaFile = persistence::load_json(SCHEMA_FILE).unwrap_or_else(|_| {
-        eprintln!("Warning: Could not load schema file, using default schema");
-        SchemaFile {
-            version: "1.0".to_string(),
-            fields: vec![],
+    let config: ConfigFile = persistence::atomic_read_config(|config| {
+        let mut config_clone = config.clone();
+        for env_config in config_clone.environments.values_mut() {
+            env_config
+                .entries
+                .retain(|_, entry| !entry.is_secret || !entry.encrypted);
         }
-    });
+        config_clone
+    })
+    .map_err(|e| anyhow!("Failed to load config: {}. Run 'naru init' first.", e))?;
 
     let backup_data = BackupData { config, schema };
 
@@ -106,8 +113,15 @@ pub fn execute_restore(cmd: BackupRestoreCommand) -> Result<()> {
         return Err(anyhow!("Backup has invalid schema version"));
     }
 
-    persistence::save_json(CONFIG_FILE, &backup_data.config)?;
-    persistence::save_json(SCHEMA_FILE, &backup_data.schema)?;
+    persistence::atomic_update_config(|config| {
+        *config = backup_data.config.clone();
+        Ok(())
+    })?;
+
+    persistence::atomic_update_json(SCHEMA_FILE, |schema: &mut SchemaFile| {
+        *schema = backup_data.schema.clone();
+        Ok(())
+    })?;
 
     let log_path = format!("{}/audit.log", NARU_DIR);
     if let Err(e) = audit::log_action(

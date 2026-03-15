@@ -83,18 +83,24 @@ pub fn init_project() -> Result<(), PersistenceError> {
         salt: Some(salt_b64),
     };
 
-    save_json(CONFIG_FILE, &config)?;
+    // Use lock_file and direct write for initial creation since it's a new file
+    let path = Path::new(NARU_DIR).join(CONFIG_FILE);
+    let json = serde_json::to_string_pretty(&config)?;
+    fs::write(&path, json)?;
 
     let schema = SchemaFile {
         version: "1.0".to_string(),
         fields: vec![],
     };
 
-    save_json(SCHEMA_FILE, &schema)?;
+    let schema_path = Path::new(NARU_DIR).join(SCHEMA_FILE);
+    let schema_json = serde_json::to_string_pretty(&schema)?;
+    fs::write(&schema_path, schema_json)?;
 
     Ok(())
 }
 
+#[allow(dead_code)]
 #[deprecated(
     since = "0.6.1",
     note = "Use atomic_update_config for config files to prevent race conditions. This function is not atomic and can cause data loss in concurrent scenarios."
@@ -122,6 +128,7 @@ pub fn save_json<T: serde::Serialize>(filename: &str, data: &T) -> Result<(), Pe
     Ok(())
 }
 
+#[allow(dead_code)]
 #[deprecated(
     since = "0.6.1",
     note = "Use atomic_read_config or lock_file for safer concurrent access patterns."
@@ -189,13 +196,16 @@ pub fn lock_file(filename: &str) -> Result<LockedFile, PersistenceError> {
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        let _ = fs::write(&path, serde_json::to_string_pretty(&default_config).unwrap_or_default());
+        let _ = fs::write(
+            &path,
+            serde_json::to_string_pretty(&default_config).unwrap_or_default(),
+        );
     }
 
     // Retry logic for acquiring lock - helps with concurrent access
     let max_retries = 5;
     let mut last_error = None;
-    
+
     for attempt in 0..max_retries {
         match locking::FileLock::acquire_exclusive(&path) {
             Ok(_lock) => {
@@ -210,27 +220,28 @@ pub fn lock_file(filename: &str) -> Result<LockedFile, PersistenceError> {
             }
         }
     }
-    
+
     Err(PersistenceError::IoError {
         source: std::io::Error::other(format!(
-            "Could not acquire file lock after {} attempts: {:?}", 
+            "Could not acquire file lock after {} attempts: {:?}",
             max_retries, last_error
         )),
     })
 }
 
-pub fn atomic_update_config<F>(update_fn: F) -> Result<(), PersistenceError>
+pub fn atomic_update_json<T, F>(filename: &str, update_fn: F) -> Result<(), PersistenceError>
 where
-    F: FnOnce(&mut ConfigFile) -> Result<(), PersistenceError>,
+    T: serde::Serialize + serde::de::DeserializeOwned,
+    F: FnOnce(&mut T) -> Result<(), PersistenceError>,
 {
-    let locked = lock_file(CONFIG_FILE)?;
-    let mut config: ConfigFile = locked.read()?;
+    let locked = lock_file(filename)?;
+    let mut data: T = locked.read()?;
 
-    update_fn(&mut config)?;
+    update_fn(&mut data)?;
 
     // Write atomically by writing to temp file first, then renaming
     let temp_path = locked.path().with_extension("json.tmp");
-    let json = serde_json::to_string_pretty(&config)
+    let json = serde_json::to_string_pretty(&data)
         .map_err(|e| PersistenceError::JsonError { source: e })?;
     fs::write(&temp_path, json).map_err(|e| PersistenceError::IoError { source: e })?;
     fs::rename(&temp_path, locked.path()).map_err(|e| PersistenceError::IoError { source: e })?;
@@ -238,14 +249,28 @@ where
     Ok(())
 }
 
-#[allow(dead_code)]
+pub fn atomic_read_json<T, F, R>(filename: &str, read_fn: F) -> Result<R, PersistenceError>
+where
+    T: serde::de::DeserializeOwned,
+    F: FnOnce(&T) -> R,
+{
+    let locked = lock_file(filename)?;
+    let data: T = locked.read()?;
+    Ok(read_fn(&data))
+}
+
+pub fn atomic_update_config<F>(update_fn: F) -> Result<(), PersistenceError>
+where
+    F: FnOnce(&mut ConfigFile) -> Result<(), PersistenceError>,
+{
+    atomic_update_json(CONFIG_FILE, update_fn)
+}
+
 pub fn atomic_read_config<F, R>(read_fn: F) -> Result<R, PersistenceError>
 where
     F: FnOnce(&ConfigFile) -> R,
 {
-    let locked = lock_file(CONFIG_FILE)?;
-    let config: ConfigFile = locked.read()?;
-    Ok(read_fn(&config))
+    atomic_read_json(CONFIG_FILE, read_fn)
 }
 
 pub fn import_from_env(file_path: &str, env: &str) -> Result<ConfigFile, PersistenceError> {
@@ -282,7 +307,6 @@ pub fn import_from_env(file_path: &str, env: &str) -> Result<ConfigFile, Persist
         })?;
 
     let content = fs::read_to_string(sanitized_path)?;
-    let mut config: ConfigFile = load_json(CONFIG_FILE)?;
 
     let mut dotenv_pairs = HashMap::new();
     for line in content.lines() {
@@ -306,7 +330,14 @@ pub fn import_from_env(file_path: &str, env: &str) -> Result<ConfigFile, Persist
         }
     }
 
-    merge_map_into_config(&mut config, env, dotenv_pairs)
+    let mut final_config = None;
+    atomic_update_config(|config| {
+        let merged = merge_map_into_config(config, env, dotenv_pairs.clone())?;
+        final_config = Some(merged);
+        Ok(())
+    })?;
+
+    Ok(final_config.unwrap())
 }
 
 pub fn import_from_yaml(file_path: &str, env: &str) -> Result<ConfigFile, PersistenceError> {
@@ -339,7 +370,6 @@ pub fn import_from_yaml(file_path: &str, env: &str) -> Result<ConfigFile, Persis
 
     let content = fs::read_to_string(sanitized_path)?;
     let yaml_pairs: HashMap<String, serde_yaml::Value> = serde_yaml::from_str(&content)?;
-    let mut config: ConfigFile = load_json(CONFIG_FILE)?;
 
     let mut string_pairs: HashMap<String, String> = HashMap::new();
     for (k, v) in yaml_pairs {
@@ -352,7 +382,14 @@ pub fn import_from_yaml(file_path: &str, env: &str) -> Result<ConfigFile, Persis
         string_pairs.insert(k, val_str);
     }
 
-    merge_map_into_config(&mut config, env, string_pairs)
+    let mut final_config = None;
+    atomic_update_config(|config| {
+        let merged = merge_map_into_config(config, env, string_pairs.clone())?;
+        final_config = Some(merged);
+        Ok(())
+    })?;
+
+    Ok(final_config.unwrap())
 }
 
 pub fn import_from_json(file_path: &str, env: &str) -> Result<ConfigFile, PersistenceError> {
@@ -385,7 +422,6 @@ pub fn import_from_json(file_path: &str, env: &str) -> Result<ConfigFile, Persis
 
     let content = fs::read_to_string(sanitized_path)?;
     let json_pairs: HashMap<String, serde_json::Value> = serde_json::from_str(&content)?;
-    let mut config: ConfigFile = load_json(CONFIG_FILE)?;
 
     let mut string_pairs: HashMap<String, String> = HashMap::new();
     for (k, v) in json_pairs {
@@ -398,7 +434,14 @@ pub fn import_from_json(file_path: &str, env: &str) -> Result<ConfigFile, Persis
         string_pairs.insert(k, val_str);
     }
 
-    merge_map_into_config(&mut config, env, string_pairs)
+    let mut final_config = None;
+    atomic_update_config(|config| {
+        let merged = merge_map_into_config(config, env, string_pairs.clone())?;
+        final_config = Some(merged);
+        Ok(())
+    })?;
+
+    Ok(final_config.unwrap())
 }
 
 fn encrypt_entry_value(entry: &mut ConfigValueEntry) -> Result<(), PersistenceError> {
@@ -436,10 +479,11 @@ fn merge_map_into_config(
     env: &str,
     pairs: HashMap<String, String>,
 ) -> Result<ConfigFile, PersistenceError> {
-    let schema: SchemaFile = load_json(SCHEMA_FILE).unwrap_or(SchemaFile {
-        version: "1.0".to_string(),
-        fields: vec![],
-    });
+    let schema: SchemaFile =
+        atomic_read_json(SCHEMA_FILE, |s: &SchemaFile| s.clone()).unwrap_or(SchemaFile {
+            version: "1.0".to_string(),
+            fields: vec![],
+        });
 
     // Check if schema is defined (not empty) - if so, enforce schema
     let schema_is_defined = !schema.fields.is_empty();
@@ -597,13 +641,12 @@ fn get_encryption_key() -> Result<[u8; 32], PersistenceError> {
         env::var("NARU_ENCRYPTION_KEY").map_err(|_| PersistenceError::MissingEncryptionKey)?;
 
     // Load config to get the salt
-    #[allow(deprecated)]
-    let config: ConfigFile = load_json(CONFIG_FILE).map_err(|_| PersistenceError::IoError {
-        source: std::io::Error::other("Cannot load config for key derivation"),
-    })?;
-
-    let salt_str = config.salt.ok_or_else(|| PersistenceError::IoError {
-        source: std::io::Error::other("No salt found in config. Run 'naru init' to regenerate."),
+    let salt_str = atomic_read_config(|config| config.salt.clone())?.ok_or_else(|| {
+        PersistenceError::IoError {
+            source: std::io::Error::other(
+                "No salt found in config. Run 'naru init' to regenerate.",
+            ),
+        }
     })?;
 
     // Parse the salt from base64
@@ -704,8 +747,13 @@ mod tests {
             salt: None,
         };
 
-        save_json(CONFIG_FILE, &test_config).unwrap();
-        let loaded_config: ConfigFile = load_json(CONFIG_FILE).unwrap();
+        atomic_update_config(|config| {
+            *config = test_config.clone();
+            Ok(())
+        })
+        .unwrap();
+
+        let loaded_config: ConfigFile = atomic_read_config(|c| c.clone()).unwrap();
 
         assert_eq!(test_config.project_name, loaded_config.project_name);
         assert_eq!(test_config.version, loaded_config.version);
@@ -788,15 +836,19 @@ mod tests {
         let _guard = TestDirGuard::new(temp_dir.path());
         init_project().unwrap();
 
-        let mut config: ConfigFile = load_json(CONFIG_FILE).unwrap();
-        let env_config = config.environments.get_mut("development").unwrap();
-        env_config
-            .entries
-            .insert("K1".into(), ConfigValueEntry::new("V1", "string", false));
-        env_config
-            .entries
-            .insert("K2".into(), ConfigValueEntry::new("V2", "string", false));
+        atomic_update_config(|config| {
+            let env_config = config.environments.get_mut("development").unwrap();
+            env_config
+                .entries
+                .insert("K1".into(), ConfigValueEntry::new("V1", "string", false));
+            env_config
+                .entries
+                .insert("K2".into(), ConfigValueEntry::new("V2", "string", false));
+            Ok(())
+        })
+        .unwrap();
 
+        let config: ConfigFile = atomic_read_config(|c| c.clone()).unwrap();
         export_to_env(&config, "development", "exported.env").unwrap();
         let imported = import_from_env("exported.env", "staging").unwrap();
         let staging_entries = &imported.environments.get("staging").unwrap().entries;
@@ -1090,46 +1142,56 @@ mod tests {
         unsafe { std::env::set_var("NARU_ENCRYPTION_KEY", "test_key_for_edge_cases") };
         init_project().unwrap();
 
-        let mut config: ConfigFile = load_json(CONFIG_FILE).unwrap();
-        let env_config = config.environments.get_mut("development").unwrap();
+        atomic_update_config(|config| {
+            let env_config = config.environments.get_mut("development").unwrap();
 
-        // Add a secret value
-        let mut entry = ConfigValueEntry::new("secret_value", "string", true);
-        entry.encrypted = false; // Mark as not encrypted initially
-        env_config.entries.insert("SECRET_KEY".into(), entry);
+            // Add a secret value
+            let mut entry = ConfigValueEntry::new("secret_value", "string", true);
+            entry.encrypted = false; // Mark as not encrypted initially
+            env_config.entries.insert("SECRET_KEY".into(), entry);
 
-        // Encrypt it once
-        encrypt_if_needed(&mut config, "development", "SECRET_KEY").unwrap();
+            // Encrypt it once
+            encrypt_if_needed(config, "development", "SECRET_KEY")?;
+            Ok(())
+        })
+        .unwrap();
 
-        // Get the encrypted value by cloning to avoid borrowing conflicts
-        let first_encrypted = config
-            .environments
-            .get("development")
-            .unwrap()
-            .entries
-            .get("SECRET_KEY")
-            .unwrap()
-            .value
-            .clone();
+        // Get the encrypted value
+        let first_encrypted = atomic_read_config(|config| {
+            config
+                .environments
+                .get("development")
+                .unwrap()
+                .entries
+                .get("SECRET_KEY")
+                .unwrap()
+                .value
+                .clone()
+        })
+        .unwrap();
 
-        // Try to encrypt again - should not change
-        encrypt_if_needed(&mut config, "development", "SECRET_KEY").unwrap();
-        let second_encrypted = config
-            .environments
-            .get("development")
-            .unwrap()
-            .entries
-            .get("SECRET_KEY")
-            .unwrap()
-            .value
-            .clone();
+        // Try to encrypt again
+        atomic_update_config(|config| encrypt_if_needed(config, "development", "SECRET_KEY"))
+            .unwrap();
 
-        // Encryption should be deterministic with the same input, but in practice AES-GCM with random nonces
-        // will produce different outputs. So we'll decrypt to verify it's still the same value.
-        let decrypted_first =
-            crypto::decrypt_data(&first_encrypted, &get_encryption_key().unwrap()).unwrap();
-        let decrypted_second =
-            crypto::decrypt_data(&second_encrypted, &get_encryption_key().unwrap()).unwrap();
+        let second_encrypted = atomic_read_config(|config| {
+            config
+                .environments
+                .get("development")
+                .unwrap()
+                .entries
+                .get("SECRET_KEY")
+                .unwrap()
+                .value
+                .clone()
+        })
+        .unwrap();
+
+        // Encryption should be deterministic with the same input if we use the same key,
+        // but Argon2 derivation is what we test here via decrypt
+        let encryption_key = get_encryption_key().unwrap();
+        let decrypted_first = crypto::decrypt_data(&first_encrypted, &encryption_key).unwrap();
+        let decrypted_second = crypto::decrypt_data(&second_encrypted, &encryption_key).unwrap();
         assert_eq!(decrypted_first, decrypted_second);
         unsafe { std::env::remove_var("NARU_ENCRYPTION_KEY") };
     }
@@ -1141,26 +1203,33 @@ mod tests {
         let _guard = TestDirGuard::new(temp_dir.path());
         init_project().unwrap();
 
-        let mut config: ConfigFile = load_json(CONFIG_FILE).unwrap();
-        let env_config = config.environments.get_mut("development").unwrap();
+        atomic_update_config(|config| {
+            let env_config = config.environments.get_mut("development").unwrap();
 
-        // Add a non-secret value (not encrypted)
-        let entry = ConfigValueEntry::new("public_value", "string", false);
-        env_config.entries.insert("PUBLIC_KEY".into(), entry);
+            // Add a non-secret value (not encrypted)
+            let entry = ConfigValueEntry::new("public_value", "string", false);
+            env_config.entries.insert("PUBLIC_KEY".into(), entry);
+            Ok(())
+        })
+        .unwrap();
 
         // Try to decrypt - should not fail, should just leave value as is
-        let result = decrypt_if_needed(&mut config, "development", "PUBLIC_KEY");
-        assert!(result.is_ok());
+        atomic_update_config(|config| decrypt_if_needed(config, "development", "PUBLIC_KEY"))
+            .unwrap();
 
         // Value should remain unchanged
-        let value_after = &config
-            .environments
-            .get("development")
-            .unwrap()
-            .entries
-            .get("PUBLIC_KEY")
-            .unwrap()
-            .value;
+        let value_after = atomic_read_config(|config| {
+            config
+                .environments
+                .get("development")
+                .unwrap()
+                .entries
+                .get("PUBLIC_KEY")
+                .unwrap()
+                .value
+                .clone()
+        })
+        .unwrap();
         assert_eq!(value_after, "public_value");
     }
 

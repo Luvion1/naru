@@ -116,6 +116,17 @@ pub enum Commands {
         #[command(subcommand)]
         action: TemplateAction,
     },
+    /// Search configuration keys and values
+    Search {
+        /// Search query
+        query: String,
+        /// Filter by environment
+        #[arg(short, long)]
+        env: Option<String>,
+        /// Show values in results
+        #[arg(short, long)]
+        values: bool,
+    },
     /// Show version information
     Version,
 }

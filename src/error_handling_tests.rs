@@ -211,10 +211,14 @@ mod error_handling_tests {
         };
 
         // This should work but test the limits
-        assert!(persistence::save_json("large_config.json", &large_config).is_ok());
+        assert!(persistence::atomic_update_config(|config| {
+            *config = large_config.clone();
+            Ok(())
+        })
+        .is_ok());
 
         // Try to load it back
-        let loaded_result: Result<ConfigFile, _> = persistence::load_json("large_config.json");
+        let loaded_result: Result<ConfigFile, _> = persistence::atomic_read_config(|c| c.clone());
         assert!(loaded_result.is_ok());
 
         cleanup();
@@ -282,27 +286,22 @@ mod concurrency_tests {
                 thread::spawn(move || {
                     barrier.wait(); // Wait for all threads to be ready
 
-                    // Each thread tries to read and write to the config
-                    match persistence::load_json::<ConfigFile>("config.json") {
-                        Ok(mut config) => {
-                            // Modify the config slightly
-                            if let Some(dev_env) = config.environments.get_mut("development") {
-                                dev_env.entries.insert(
-                                    format!("thread_{}_key", i),
-                                    ConfigValueEntry::new(
-                                        &format!("thread_{}_value", i),
-                                        "string",
-                                        false,
-                                    ),
-                                );
-                            }
-
-                            // Try to save the config (this should be handled by file locking)
-                            let result = persistence::save_json("config.json", &config);
-                            result.is_ok() // Return whether the operation succeeded
+                    // Each thread tries to read and write to the config using atomic operations
+                    let result = persistence::atomic_update_config(|config| {
+                        // Modify the config slightly
+                        if let Some(dev_env) = config.environments.get_mut("development") {
+                            dev_env.entries.insert(
+                                format!("thread_{}_key", i),
+                                ConfigValueEntry::new(
+                                    &format!("thread_{}_value", i),
+                                    "string",
+                                    false,
+                                ),
+                            );
                         }
-                        Err(_) => false, // Failed to load
-                    }
+                        Ok(())
+                    });
+                    result.is_ok() // Return whether the operation succeeded
                 })
             })
             .collect();
@@ -310,10 +309,10 @@ mod concurrency_tests {
         // Collect results
         let results: Vec<bool> = handles.into_iter().map(|h| h.join().unwrap()).collect();
 
-        // Check that at least some operations succeeded
+        // Check that all concurrent operations succeeded (thanks to locking)
         assert!(
-            results.iter().any(|&x| x),
-            "At least some concurrent operations should succeed"
+            results.iter().all(|&x| x),
+            "All concurrent atomic operations should succeed"
         );
 
         cleanup();

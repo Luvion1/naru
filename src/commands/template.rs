@@ -31,11 +31,13 @@ pub struct TemplateVariable {
 }
 
 pub fn template_create(name: &str, include_secrets: bool) -> Result<(), PersistenceError> {
-    let config: ConfigFile = persistence::load_json(constants::CONFIG_FILE)?;
-    let schema: SchemaFile = persistence::load_json(constants::SCHEMA_FILE).unwrap_or(SchemaFile {
-        version: "1.0".to_string(),
-        fields: vec![],
-    });
+    let config: ConfigFile = persistence::atomic_read_config(|c| c.clone())?;
+    let schema: SchemaFile =
+        persistence::atomic_read_json(constants::SCHEMA_FILE, |s: &SchemaFile| s.clone())
+            .unwrap_or(SchemaFile {
+                version: "1.0".to_string(),
+                fields: vec![],
+            });
 
     let templates_dir = PathBuf::from(constants::NARU_DIR).join("templates");
     fs::create_dir_all(&templates_dir).map_err(|e| PersistenceError::IoError {
@@ -127,62 +129,59 @@ pub fn template_apply(name: &str, env: &str) -> Result<(), PersistenceError> {
             source: std::io::Error::other(format!("Invalid template format: {}", e)),
         })?;
 
-    let mut config: ConfigFile = persistence::load_json(constants::CONFIG_FILE)?;
-
-    if !config.environments.contains_key(env) {
-        config.environments.insert(
-            env.to_string(),
-            EnvironmentConfig {
-                parent: None,
-                entries: HashMap::new(),
-            },
-        );
-    }
-
     let mut applied_count = 0;
 
-    if let Some(env_config) = config.environments.get_mut(env) {
-        for var in &template.variables {
-            if !env_config.entries.contains_key(&var.key) {
-                let value = var.default.clone().unwrap_or_else(|| {
-                    if var.secret {
-                        String::new()
-                    } else {
-                        format!("TODO_{}", var.key)
-                    }
-                });
+    persistence::atomic_update_config(|config| {
+        if !config.environments.contains_key(env) {
+            config.environments.insert(
+                env.to_string(),
+                EnvironmentConfig {
+                    parent: None,
+                    entries: HashMap::new(),
+                },
+            );
+        }
 
-                env_config.entries.insert(
-                    var.key.clone(),
-                    ConfigValueEntry {
-                        value,
-                        r#type: var.kind.clone(),
-                        is_secret: var.secret,
-                        encrypted: false,
-                    },
-                );
-                applied_count += 1;
+        if let Some(env_config) = config.environments.get_mut(env) {
+            for var in &template.variables {
+                if !env_config.entries.contains_key(&var.key) {
+                    let value = var.default.clone().unwrap_or_else(|| {
+                        if var.secret {
+                            String::new()
+                        } else {
+                            format!("TODO_{}", var.key)
+                        }
+                    });
+
+                    env_config.entries.insert(
+                        var.key.clone(),
+                        ConfigValueEntry {
+                            value,
+                            r#type: var.kind.clone(),
+                            is_secret: var.secret,
+                            encrypted: false,
+                        },
+                    );
+                    applied_count += 1;
+                }
             }
         }
-    }
+        Ok(())
+    })?;
 
     if !template.schema_fields.is_empty() {
-        let mut current_schema: SchemaFile = persistence::load_json(constants::SCHEMA_FILE)
-            .unwrap_or(SchemaFile {
-                version: "1.0".to_string(),
-                fields: vec![],
-            });
-
-        for field in &template.schema_fields {
-            if !current_schema.fields.iter().any(|f| f.key == field.key) {
-                current_schema.fields.push(field.clone());
-            }
-        }
-
-        persistence::save_json(constants::SCHEMA_FILE, &current_schema)?;
+        persistence::atomic_update_json(
+            constants::SCHEMA_FILE,
+            |current_schema: &mut SchemaFile| {
+                for field in &template.schema_fields {
+                    if !current_schema.fields.iter().any(|f| f.key == field.key) {
+                        current_schema.fields.push(field.clone());
+                    }
+                }
+                Ok(())
+            },
+        )?;
     }
-
-    persistence::save_json(constants::CONFIG_FILE, &config)?;
 
     println!(
         "{} Template '{}' applied: {} variables added to '{}'",

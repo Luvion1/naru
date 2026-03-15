@@ -16,7 +16,7 @@ fn get_encryption_key() -> Result<[u8; 32], PersistenceError> {
         env::var("NARU_ENCRYPTION_KEY").map_err(|_| PersistenceError::MissingEncryptionKey)?;
 
     let config: ConfigFile =
-        persistence::load_json(constants::CONFIG_FILE).map_err(|_| PersistenceError::IoError {
+        persistence::atomic_read_config(|c| c.clone()).map_err(|_| PersistenceError::IoError {
             source: std::io::Error::other("Cannot load config for key derivation"),
         })?;
 
@@ -63,26 +63,18 @@ pub fn batch_set(file: &str, env: &str) -> Result<(), PersistenceError> {
     })?;
 
     let content = fs::read_to_string(&sanitized_path)?;
-    let schema: SchemaFile = persistence::load_json(constants::SCHEMA_FILE).unwrap_or(SchemaFile {
-        version: "1.0".to_string(),
-        fields: vec![],
-    });
+    let schema: SchemaFile =
+        persistence::atomic_read_json(constants::SCHEMA_FILE, |s: &SchemaFile| s.clone())
+            .unwrap_or(SchemaFile {
+                version: "1.0".to_string(),
+                fields: vec![],
+            });
 
     let schema_defined = !schema.fields.is_empty();
-    let mut config: ConfigFile = persistence::load_json(constants::CONFIG_FILE)?;
-
-    if !config.environments.contains_key(env) {
-        config.environments.insert(
-            env.to_string(),
-            EnvironmentConfig {
-                parent: None,
-                entries: HashMap::new(),
-            },
-        );
-    }
 
     let mut success_count = 0;
     let mut error_count = 0;
+    let mut entries_to_add = HashMap::new();
 
     for (line_num, line) in content.lines().enumerate() {
         let line = line.trim();
@@ -139,10 +131,8 @@ pub fn batch_set(file: &str, env: &str) -> Result<(), PersistenceError> {
                 encrypted: false,
             };
 
-            if let Some(env_config) = config.environments.get_mut(env) {
-                env_config.entries.insert(key.to_string(), entry);
-                success_count += 1;
-            }
+            entries_to_add.insert(key.to_string(), entry);
+            success_count += 1;
         } else {
             eprintln!(
                 "{} Line {}: Invalid format (expected key=value)",
@@ -154,7 +144,41 @@ pub fn batch_set(file: &str, env: &str) -> Result<(), PersistenceError> {
     }
 
     if success_count > 0 {
-        persistence::save_json(constants::CONFIG_FILE, &config)?;
+        let encryption_key = if entries_to_add.values().any(|e| e.is_secret) {
+            Some(get_encryption_key()?)
+        } else {
+            None
+        };
+
+        persistence::atomic_update_config(|config| {
+            if !config.environments.contains_key(env) {
+                config.environments.insert(
+                    env.to_string(),
+                    EnvironmentConfig {
+                        parent: None,
+                        entries: HashMap::new(),
+                    },
+                );
+            }
+
+            if let Some(env_config) = config.environments.get_mut(env) {
+                for (key, mut entry) in entries_to_add.clone() {
+                    if entry.is_secret {
+                        if let Some(key_bytes) = &encryption_key {
+                            let encrypted_value = crypto::encrypt_data(&entry.value, key_bytes)
+                                .map_err(|e| persistence::PersistenceError::IoError {
+                                    source: std::io::Error::other(e.to_string()),
+                                })?;
+                            entry.value = encrypted_value;
+                            entry.encrypted = true;
+                        }
+                    }
+                    env_config.entries.insert(key, entry);
+                }
+            }
+            Ok(())
+        })?;
+
         println!(
             "{} Batch set complete: {} succeeded, {} failed",
             style("✓").green(),
@@ -173,55 +197,59 @@ pub fn batch_get(keys: &[String], env: &str) -> Result<(), PersistenceError> {
         source: std::io::Error::new(std::io::ErrorKind::InvalidInput, e),
     })?;
 
-    let config: ConfigFile = persistence::load_json(constants::CONFIG_FILE)?;
+    persistence::atomic_read_config(|config| {
+        let env_config =
+            config
+                .environments
+                .get(env)
+                .ok_or_else(|| persistence::PersistenceError::IoError {
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("Environment '{}' not found", env),
+                    ),
+                })?;
 
-    let env_config = config
-        .environments
-        .get(env)
-        .ok_or_else(|| PersistenceError::IoError {
-            source: std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("Environment '{}' not found", env),
-            ),
-        })?;
+        let mut found_count = 0;
+        let mut missing_count = 0;
 
-    let mut found_count = 0;
-    let mut missing_count = 0;
-
-    for key in keys {
-        if let Some(entry) = env_config.entries.get(key) {
-            if entry.is_secret && entry.encrypted {
-                let encryption_key = get_encryption_key()?;
-                match crypto::decrypt_data(&entry.value, &encryption_key) {
-                    Ok(decrypted) => {
-                        println!("{}={}", key, decrypted);
-                        found_count += 1;
+        for key in keys {
+            if let Some(entry) = env_config.entries.get(key) {
+                if entry.is_secret && entry.encrypted {
+                    // We need a way to get the encryption key here.
+                    // But get_encryption_key() reads the config file again!
+                    // This is inefficient but safer if we don't want to change the API too much.
+                    // Let's use a closure that has access to the key.
+                    let encryption_key = get_encryption_key()?;
+                    match crypto::decrypt_data(&entry.value, &encryption_key) {
+                        Ok(decrypted) => {
+                            println!("{}={}", key, decrypted);
+                            found_count += 1;
+                        }
+                        Err(_) => {
+                            eprintln!("{} Failed to decrypt {}", style("✗").red(), key);
+                            missing_count += 1;
+                        }
                     }
-                    Err(_) => {
-                        eprintln!("{} Failed to decrypt {}", style("✗").red(), key);
-                        missing_count += 1;
-                    }
+                } else {
+                    println!("{}={}", key, entry.value);
+                    found_count += 1;
                 }
             } else {
-                println!("{}={}", key, entry.value);
-                found_count += 1;
+                eprintln!("{} Key '{}' not found in {}", style("✗").red(), key, env);
+                missing_count += 1;
             }
-        } else {
-            eprintln!("{} Key '{}' not found in {}", style("✗").red(), key, env);
-            missing_count += 1;
         }
-    }
 
-    if missing_count > 0 && found_count == 0 {
-        return Err(PersistenceError::IoError {
-            source: std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "None of the requested keys were found",
-            ),
-        });
-    }
-
-    Ok(())
+        if missing_count > 0 && found_count == 0 {
+            return Err(persistence::PersistenceError::IoError {
+                source: std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "None of the requested keys were found",
+                ),
+            });
+        }
+        Ok(())
+    })?
 }
 
 pub fn batch_get_all(env: &str) -> Result<(), PersistenceError> {
@@ -229,47 +257,47 @@ pub fn batch_get_all(env: &str) -> Result<(), PersistenceError> {
         source: std::io::Error::new(std::io::ErrorKind::InvalidInput, e),
     })?;
 
-    let config: ConfigFile = persistence::load_json(constants::CONFIG_FILE)?;
+    persistence::atomic_read_config(|config| {
+        let env_config =
+            config
+                .environments
+                .get(env)
+                .ok_or_else(|| persistence::PersistenceError::IoError {
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("Environment '{}' not found", env),
+                    ),
+                })?;
 
-    let env_config = config
-        .environments
-        .get(env)
-        .ok_or_else(|| PersistenceError::IoError {
-            source: std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("Environment '{}' not found", env),
-            ),
-        })?;
+        if env_config.entries.is_empty() {
+            println!("{} No values in environment '{}'", style("ℹ").blue(), env);
+            return Ok(());
+        }
 
-    if env_config.entries.is_empty() {
-        println!("{} No values in environment '{}'", style("ℹ").blue(), env);
-        return Ok(());
-    }
-
-    let encryption_key = if env_config
-        .entries
-        .values()
-        .any(|e| e.is_secret && e.encrypted)
-    {
-        Some(get_encryption_key()?)
-    } else {
-        None
-    };
-
-    for (key, entry) in &env_config.entries {
-        let value = if entry.is_secret && entry.encrypted {
-            if let Some(key) = &encryption_key {
-                crypto::decrypt_data(&entry.value, key)
-                    .unwrap_or_else(|_| "[decryption failed]".to_string())
-            } else {
-                "[encrypted]".to_string()
-            }
+        let encryption_key = if env_config
+            .entries
+            .values()
+            .any(|e| e.is_secret && e.encrypted)
+        {
+            Some(get_encryption_key()?)
         } else {
-            entry.value.clone()
+            None
         };
 
-        println!("{}={}", key, value);
-    }
+        for (key, entry) in &env_config.entries {
+            let value = if entry.is_secret && entry.encrypted {
+                if let Some(key) = &encryption_key {
+                    crypto::decrypt_data(&entry.value, key)
+                        .unwrap_or_else(|_| "[decryption failed]".to_string())
+                } else {
+                    "[encrypted]".to_string()
+                }
+            } else {
+                entry.value.clone()
+            };
 
-    Ok(())
+            println!("{}={}", key, value);
+        }
+        Ok(())
+    })?
 }

@@ -31,28 +31,18 @@ mod penetration_tests {
             return;
         }
 
-        // Set initial value using API
-        let mut config: crate::core::models::ConfigFile =
-            match crate::core::persistence::load_json(crate::core::constants::CONFIG_FILE) {
-                Ok(c) => c,
-                Err(e) => {
-                    println!("Failed to load config: {:?}", e);
-                    let _ = std::env::set_current_dir(&original_dir);
-                    unsafe { std::env::remove_var("NARU_ENCRYPTION_KEY") };
-                    return;
-                }
-            };
+        // Set initial value using atomic API
+        let _ = crate::core::persistence::atomic_update_config(|config| {
+            if let Some(env_config) = config.environments.get_mut("development") {
+                env_config.entries.insert(
+                    "SHARED_KEY".to_string(),
+                    crate::core::models::ConfigValueEntry::new("initial_value", "string", false),
+                );
+            }
+            Ok(())
+        });
 
-        if let Some(env_config) = config.environments.get_mut("development") {
-            env_config.entries.insert(
-                "SHARED_KEY".to_string(),
-                crate::core::models::ConfigValueEntry::new("initial_value", "string", false),
-            );
-        }
-
-        let _ = crate::core::persistence::save_json(crate::core::constants::CONFIG_FILE, &config);
-
-        // Simulate concurrent writes (race condition) using API
+        // Simulate concurrent writes (race condition) using atomic API
         let barrier = Arc::new(Barrier::new(3));
         let mut handles = vec![];
 
@@ -61,27 +51,19 @@ mod penetration_tests {
             let handle = thread::spawn(move || {
                 barrier_clone.wait();
                 // All threads try to set different values simultaneously
-                let mut config: crate::core::models::ConfigFile =
-                    match crate::core::persistence::load_json(crate::core::constants::CONFIG_FILE) {
-                        Ok(c) => c,
-                        Err(_) => return,
-                    };
-
-                if let Some(env_config) = config.environments.get_mut("development") {
-                    env_config.entries.insert(
-                        "SHARED_KEY".to_string(),
-                        crate::core::models::ConfigValueEntry::new(
-                            &format!("thread{}_value", i),
-                            "string",
-                            false,
-                        ),
-                    );
-                }
-
-                let _ = crate::core::persistence::save_json(
-                    crate::core::constants::CONFIG_FILE,
-                    &config,
-                );
+                let _ = crate::core::persistence::atomic_update_config(|config| {
+                    if let Some(env_config) = config.environments.get_mut("development") {
+                        env_config.entries.insert(
+                            "SHARED_KEY".to_string(),
+                            crate::core::models::ConfigValueEntry::new(
+                                &format!("thread{}_value", i),
+                                "string",
+                                false,
+                            ),
+                        );
+                    }
+                    Ok(())
+                });
             });
             handles.push(handle);
         }
@@ -90,33 +72,32 @@ mod penetration_tests {
             handle.join().unwrap();
         }
 
-        // Get the final value BEFORE restoring directory
-        let final_value: String = crate::core::persistence::load_json(crate::core::constants::CONFIG_FILE)
-            .ok()
-            .and_then(|config: crate::core::models::ConfigFile| {
-                config.environments.get("development")
-                    .and_then(|e| e.entries.get("SHARED_KEY"))
-                    .map(|e| e.value.clone())
-            })
-            .unwrap_or_default();
+        // Get the final value using atomic API
+        let final_value: String = crate::core::persistence::atomic_read_config(|config| {
+            config
+                .environments
+                .get("development")
+                .and_then(|e| e.entries.get("SHARED_KEY"))
+                .map(|e| e.value.clone())
+        })
+        .ok()
+        .flatten()
+        .unwrap_or_default();
 
         println!("Final value after race: {}", final_value);
 
-        // In a race condition, we might lose some writes
-        let valid_values = [
-            "initial_value",
-            "thread0_value",
-            "thread1_value",
-            "thread2_value",
-        ];
+        // With atomic operations, we should NOT lose any writes in a way that produces an invalid state
+        // but since they are all overwriting the same key, the last one wins.
+        // The important part is that we don't have partial data or corruption.
+        let valid_thread_values = ["thread0_value", "thread1_value", "thread2_value"];
 
-        if !valid_values.contains(&final_value.as_str()) {
+        if !valid_thread_values.contains(&final_value.as_str()) {
             println!(
                 "⚠️  RACE CONDITION DETECTED: Unexpected value '{}'",
                 final_value
             );
         } else {
-            println!("✓ No obvious race condition detected in this run");
+            println!("✓ Atomic operations prevented data corruption during race");
         }
 
         let _ = std::env::set_current_dir(original_dir);
@@ -214,7 +195,7 @@ mod penetration_tests {
         // Try to inject malicious content via key name - test validation directly
         let malicious_key = "KEY\n{\"injected\": true}";
         let validation_result = crate::core::security::validate_config_key(malicious_key);
-        
+
         println!("✓ Key validation result: {:?}", validation_result);
     }
 
@@ -229,12 +210,7 @@ mod penetration_tests {
         println!("====================================");
 
         // Test key validation for various key patterns
-        let test_keys = [
-            "DB_PWD",
-            "API_SECRET_KEY",
-            "AUTH_TOKEN",
-            "MY_PASSPHRASE",
-        ];
+        let test_keys = ["DB_PWD", "API_SECRET_KEY", "AUTH_TOKEN", "MY_PASSPHRASE"];
 
         for key in &test_keys {
             let result = crate::core::security::validate_config_key(key);
