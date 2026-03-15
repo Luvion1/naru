@@ -3,18 +3,18 @@ use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use argon2::{password_hash::rand_core::OsRng, Argon2};
 use hex;
 use rand::RngCore;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 #[allow(dead_code)]
 pub fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32], Box<dyn std::error::Error>> {
-    let mut key = Box::new([0u8; 32]);
+    let mut key = [0u8; 32];
     let argon2 = Argon2::default();
     argon2
-        .hash_password_into(password.as_bytes(), salt, &mut *key)
+        .hash_password_into(password.as_bytes(), salt, &mut key)
         .map_err(|e| {
             Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
         })?;
-    let result = *key;
+    let result = key;
     key.zeroize();
     Ok(result)
 }
@@ -24,28 +24,61 @@ pub fn derive_key_secure(
     password: &str,
     salt: &[u8],
 ) -> Result<[u8; 32], Box<dyn std::error::Error>> {
-    let mut key = Box::new([0u8; 32]);
+    let mut key = [0u8; 32];
     let argon2 = Argon2::default();
     argon2
-        .hash_password_into(password.as_bytes(), salt, &mut *key)
+        .hash_password_into(password.as_bytes(), salt, &mut key)
         .map_err(|e| {
             Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
         })?;
-    let result = *key;
+    let result = key;
     key.zeroize();
     Ok(result)
 }
 
-#[allow(dead_code)]
 pub fn is_key_too_weak(key: &[u8; 32]) -> bool {
     use std::collections::HashSet;
+    
+    // Check 1: Too few unique bytes (entropy check)
     let unique_bytes = key.iter().collect::<HashSet<_>>().len();
-    unique_bytes < 8
+    if unique_bytes < 8 {
+        return true;
+    }
+    
+    // Check 2: All bytes the same
+    if key.iter().all(|&b| b == key[0]) {
+        return true;
+    }
+    
+    // Check 3: Sequential pattern (0,1,2,3... or 255,254,253...)
+    let is_sequential_asc = key.iter().enumerate().all(|(i, &b)| b as i16 == (key[0] as i16 + i as i16) % 256);
+    let is_sequential_desc = key.iter().enumerate().all(|(i, &b)| b as i16 == (key[0] as i16 - i as i16).wrapping_rem(256));
+    if is_sequential_asc || is_sequential_desc {
+        return true;
+    }
+    
+    // Check 4: Alternating pattern (like 0xAA, 0x55, 0xAA, 0x55...)
+    if key.len() >= 4 {
+        let alternating_two = key[0] == key[2] && key[1] == key[3] && key[0] != key[1];
+        let all_alternating = key.windows(2).all(|w| w[0] == key[0] && w[1] == key[1] || w[0] == key[1] && w[1] == key[0]);
+        if alternating_two && all_alternating {
+            return true;
+        }
+    }
+    
+    // Check 5: Half zeros or half 0xFF
+    let zeros = key.iter().filter(|&&b| b == 0).count();
+    let ones = key.iter().filter(|&&b| b == 0xFF).count();
+    if zeros > 24 || ones > 24 {
+        return true;
+    }
+    
+    false
 }
 
 pub fn validate_key_strength(key: &[u8; 32]) -> Result<(), &'static str> {
     if is_key_too_weak(key) {
-        return Err("Encryption key is too weak (insufficient entropy)");
+        return Err("Encryption key is too weak (insufficient entropy). Use a strong, random key.");
     }
     Ok(())
 }
@@ -69,9 +102,14 @@ pub fn encrypt_data(data: &str, key: &[u8; 32]) -> Result<String, Box<dyn std::e
     OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
 
-    let ciphertext = cipher.encrypt(nonce, data.as_ref()).map_err(|e| {
+    // Use Zeroizing for plaintext data in memory
+    let mut plaintext = Zeroizing::new(data.as_bytes().to_vec());
+    let ciphertext = cipher.encrypt(nonce, plaintext.as_ref()).map_err(|e| {
         Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
     })?;
+
+    // Zeroize plaintext immediately after encryption
+    plaintext.zeroize();
 
     // Combine nonce and ciphertext, then encode as hex
     let mut encrypted_data = nonce_bytes.to_vec();
@@ -100,11 +138,16 @@ pub fn decrypt_data(
     })?;
     let nonce = Nonce::from_slice(nonce_bytes);
 
-    let plaintext = cipher.decrypt(nonce, ciphertext.as_ref()).map_err(|e| {
+    let plaintext_bytes = cipher.decrypt(nonce, ciphertext.as_ref()).map_err(|e| {
         Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
     })?;
 
-    Ok(String::from_utf8(plaintext)?)
+    // Use Zeroizing for decrypted plaintext
+    let mut plaintext = Zeroizing::new(plaintext_bytes);
+    let result = String::from_utf8(plaintext.to_vec());
+    plaintext.zeroize();
+    
+    Ok(result?)
 }
 
 /// Fungsi untuk mengenkripsi seluruh file

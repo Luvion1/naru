@@ -110,6 +110,10 @@ pub fn init_project() -> Result<(), PersistenceError> {
     Ok(())
 }
 
+#[deprecated(
+    since = "0.6.1",
+    note = "Use atomic_update_config for config files to prevent race conditions. This function is not atomic and can cause data loss in concurrent scenarios."
+)]
 pub fn save_json<T: serde::Serialize>(filename: &str, data: &T) -> Result<(), PersistenceError> {
     // Sanitize filename to prevent directory traversal
     let sanitized_filename =
@@ -125,11 +129,18 @@ pub fn save_json<T: serde::Serialize>(filename: &str, data: &T) -> Result<(), Pe
             source: std::io::Error::other(format!("Could not acquire file lock: {}", e)),
         })?;
 
+    // Write atomically using temp file + rename pattern
+    let temp_path = path.with_extension("json.tmp");
     let json = serde_json::to_string_pretty(data)?;
-    fs::write(path, json)?;
+    fs::write(&temp_path, json)?;
+    fs::rename(&temp_path, &path)?;
     Ok(())
 }
 
+#[deprecated(
+    since = "0.6.1",
+    note = "Use atomic_read_config or lock_file for safer concurrent access patterns."
+)]
 pub fn load_json<T: serde::de::DeserializeOwned>(filename: &str) -> Result<T, PersistenceError> {
     let sanitized_filename =
         security::sanitize_file_path(filename).map_err(|e| PersistenceError::IoError {
@@ -143,7 +154,7 @@ pub fn load_json<T: serde::de::DeserializeOwned>(filename: &str) -> Result<T, Pe
             source: std::io::Error::other(format!("Could not acquire file lock: {}", e)),
         })?;
 
-    let content = fs::read_to_string(path)?;
+    let content = fs::read_to_string(&path)?;
     let data = serde_json::from_str(&content)?;
     Ok(data)
 }
@@ -385,6 +396,21 @@ fn encrypt_entry_value(entry: &mut ConfigValueEntry) -> Result<(), PersistenceEr
     Ok(())
 }
 
+fn decrypt_entry_value(entry: &mut ConfigValueEntry) -> Result<(), PersistenceError> {
+    if entry.encrypted {
+        let encryption_key = get_encryption_key()?;
+        let decrypted_value = crypto::decrypt_data(&entry.value, &encryption_key).map_err(|e| {
+            PersistenceError::IoError {
+                source: std::io::Error::other(e.to_string()),
+            }
+        })?;
+
+        entry.value = decrypted_value;
+        entry.encrypted = false;
+    }
+    Ok(())
+}
+
 fn merge_map_into_config(
     config: &mut ConfigFile,
     env: &str,
@@ -571,6 +597,7 @@ fn get_encryption_key() -> Result<[u8; 32], PersistenceError> {
         env::var("NARU_ENCRYPTION_KEY").map_err(|_| PersistenceError::MissingEncryptionKey)?;
 
     // Load config to get the salt
+    #[allow(deprecated)]
     let config: ConfigFile = load_json(CONFIG_FILE).map_err(|_| PersistenceError::IoError {
         source: std::io::Error::other("Cannot load config for key derivation"),
     })?;
@@ -631,18 +658,7 @@ pub fn decrypt_if_needed(
 ) -> Result<(), PersistenceError> {
     if let Some(env_config) = config.environments.get_mut(env) {
         if let Some(entry) = env_config.entries.get_mut(key) {
-            if entry.encrypted {
-                let encryption_key = get_encryption_key()?;
-                let decrypted_value =
-                    crypto::decrypt_data(&entry.value, &encryption_key).map_err(|e| {
-                        PersistenceError::IoError {
-                            source: std::io::Error::other(e.to_string()),
-                        }
-                    })?;
-
-                entry.value = decrypted_value;
-                entry.encrypted = false;
-            }
+            decrypt_entry_value(entry)?;
         }
     }
     Ok(())

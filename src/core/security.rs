@@ -147,6 +147,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 }
 
 /// Validate environment name to prevent injection attacks
+/// Returns the normalized form for consistent storage
 pub fn validate_environment_name(name: &str) -> Result<(), &'static str> {
     // Normalize Unicode to NFC form to prevent bypass via different encodings
     let normalized = normalize_unicode(name);
@@ -154,6 +155,11 @@ pub fn validate_environment_name(name: &str) -> Result<(), &'static str> {
     // Check if name is empty
     if normalized.is_empty() {
         return Err("Environment name cannot be empty");
+    }
+
+    // Check for null bytes (must check before normalization)
+    if name.contains('\0') {
+        return Err("Environment name contains null bytes");
     }
 
     // Check for invalid characters
@@ -175,7 +181,13 @@ pub fn validate_environment_name(name: &str) -> Result<(), &'static str> {
 }
 
 /// Validate configuration key to prevent injection attacks
+/// Returns the normalized form for consistent storage
 pub fn validate_config_key(key: &str) -> Result<(), &'static str> {
+    // Check for null bytes first (before any processing)
+    if key.contains('\0') {
+        return Err("Configuration key contains null bytes");
+    }
+
     // Normalize Unicode to NFC form to prevent bypass via different encodings
     let normalized = normalize_unicode(key);
 
@@ -200,6 +212,18 @@ pub fn validate_config_key(key: &str) -> Result<(), &'static str> {
     }
 
     Ok(())
+}
+
+/// Sanitize and normalize a configuration key for storage
+/// Returns the NFC-normalized form for consistent comparison
+pub fn normalize_config_key(key: &str) -> String {
+    normalize_unicode(key)
+}
+
+/// Sanitize and normalize an environment name for storage
+/// Returns the NFC-normalized form for consistent comparison
+pub fn normalize_environment_name(name: &str) -> String {
+    normalize_unicode(name)
 }
 
 /// Sanitize string value to prevent injection

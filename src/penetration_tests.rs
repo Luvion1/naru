@@ -254,16 +254,9 @@ mod penetration_tests {
         println!("\n🟢 EXPLOIT 7: Integer Overflow Test");
         println!("====================================");
 
-        let temp_dir = TempDir::new().unwrap();
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp_dir.path()).unwrap();
-
-        unsafe { std::env::set_var("NARU_ENCRYPTION_KEY", "test_key_for_overflow") };
-
-        // Initialize naru
-        crate::core::persistence::init_project().unwrap();
-
         // Try integer overflow values - test validation directly
+        // Note: This test doesn't need project initialization since it tests
+        // the validation function directly
         let overflow_values = [
             "9223372036854775808",  // i64::MAX + 1
             "-9223372036854775809", // i64::MIN - 1
@@ -290,9 +283,6 @@ mod penetration_tests {
                 println!("✓ Integer overflow rejected: {}", value);
             }
         }
-
-        let _ = std::env::set_current_dir(&original_dir);
-        unsafe { std::env::remove_var("NARU_ENCRYPTION_KEY") };
     }
 
     // ========================================================================

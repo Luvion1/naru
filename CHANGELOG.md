@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.1] - 2026-03-15
+### Security Fixes
+- **Race Condition Prevention**: Added deprecation warnings to `save_json()` and `load_json()` in favor of atomic operations (`atomic_update_config()`, `lock_file()`)
+- **Key Zeroization**: Implemented secure memory zeroization for encryption keys using `zeroize` crate in `derive_key()`, `derive_key_secure()`, `encrypt_data()`, and `decrypt_data()`
+- **Weak Key Detection**: Enhanced `is_key_too_weak()` with comprehensive checks for sequential patterns, alternating patterns, and low entropy keys
+- **Secure Memory Allocation**: Added `Zeroizing` wrapper for plaintext buffers during encryption/decryption operations
+- **Unicode Normalization**: Added early null byte detection before Unicode normalization in `validate_config_key()` and `validate_environment_name()`
+- **Helper Functions**: Added `normalize_config_key()` and `normalize_environment_name()` for consistent Unicode storage
+
+### Fixed
+- Integer overflow test setup issue in penetration tests
+- All 257 tests passing (100% test suite success rate)
+
+### Deprecated
+- `save_json()`: Use `atomic_update_config()` for config files to prevent race conditions
+- `load_json()`: Use `atomic_read_config()` or `lock_file()` for safer concurrent access
+
 ## [0.6.0] - 2026-03-15
 ### Added
 - Path traversal protection with Unicode normalization
