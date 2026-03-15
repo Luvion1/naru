@@ -13,7 +13,19 @@ pub struct BackupRestoreCommand {
 }
 
 pub fn execute_create(cmd: BackupCreateCommand) -> Result<()> {
-    let sanitized_path = crate::core::security::sanitize_file_path(&cmd.file_path)
+    // Determine appropriate file extension based on actual format
+    let file_path = if cmd.file_path.ends_with(".json") {
+        cmd.file_path.clone()
+    } else if cmd.file_path.ends_with(".tar.gz") || cmd.file_path.ends_with(".tgz") {
+        // User specified tar.gz but we write JSON - warn and change extension
+        eprintln!("Warning: Backup format is JSON, not tar.gz. Using .json extension.");
+        cmd.file_path.trim_end_matches(".tar.gz").trim_end_matches(".tgz").to_string() + ".json"
+    } else {
+        // Add .json extension if no known extension
+        cmd.file_path + ".json"
+    };
+
+    let sanitized_path = crate::core::security::sanitize_file_path(&file_path)
         .map_err(|e| anyhow!("Invalid file path: {}", e))?;
 
     let mut config: ConfigFile = persistence::load_json(CONFIG_FILE)
@@ -42,7 +54,7 @@ pub fn execute_create(cmd: BackupCreateCommand) -> Result<()> {
             .ok_or_else(|| anyhow!("Invalid file path"))?,
         json_data,
     )?;
-    println!("Backup created successfully at: {}", cmd.file_path);
+    println!("Backup created successfully at: {}", file_path);
     println!("Note: Encrypted secrets have been excluded from backup for security.");
     Ok(())
 }

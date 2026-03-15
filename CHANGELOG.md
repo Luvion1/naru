@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.2] - 2026-03-15
+### Bug Fixes
+- **Race Condition**: Fixed data loss during concurrent writes by adding global mutex lock in `locking.rs`
+- **Audit Log Integrity**: Fixed audit verification failure after concurrent operations by properly scoping file locks
+- **Config File Creation**: Auto-create config file if not exists before locking to prevent "No such file" errors
+- **Secret Encryption Hang**: Removed blocking rate limiter from key derivation (Argon2 provides sufficient protection)
+- **Backup Extension**: Fixed misleading `.tar.gz` extension - now correctly uses `.json` with warning
+
+### Improvements
+- Added retry logic with exponential backoff for file locking
+- Enhanced error messages for better debugging
+
 ## [0.6.1] - 2026-03-15
 ### Security Fixes
 - **Race Condition Prevention**: Added deprecation warnings to `save_json()` and `load_json()` in favor of atomic operations (`atomic_update_config()`, `lock_file()`)

@@ -2,7 +2,6 @@ use super::audit;
 use super::constants::*;
 use super::crypto;
 use super::locking;
-use super::rate_limiter::{RateLimitError, RateLimiter};
 use super::security;
 use crate::core::models::*;
 use argon2::{
@@ -15,22 +14,8 @@ use std::env;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use std::sync::OnceLock;
 
 use thiserror::Error;
-
-static RATE_LIMITER: OnceLock<RateLimiter> = OnceLock::new();
-
-fn get_rate_limiter() -> &'static RateLimiter {
-    RATE_LIMITER.get_or_init(RateLimiter::with_default_config)
-}
-
-#[allow(dead_code)]
-pub fn reset_rate_limit(identifier: &str) {
-    if let Some(limiter) = RATE_LIMITER.get() {
-        limiter.reset(identifier);
-    }
-}
 
 #[derive(Error, Debug)]
 pub enum PersistenceError {
@@ -189,14 +174,49 @@ pub fn lock_file(filename: &str) -> Result<LockedFile, PersistenceError> {
             source: std::io::Error::new(std::io::ErrorKind::InvalidInput, e),
         })?;
 
-    let path = Path::new(NARU_DIR).join(sanitized_filename);
+    let path = Path::new(NARU_DIR).join(&sanitized_filename);
 
-    let _lock =
-        locking::FileLock::acquire_exclusive(&path).map_err(|e| PersistenceError::IoError {
-            source: std::io::Error::other(format!("Could not acquire file lock: {}", e)),
-        })?;
+    // Ensure the config file exists before locking
+    // This prevents "No such file or directory" errors during concurrent access
+    if !path.exists() {
+        // Try to create the file with default content
+        let default_config = ConfigFile {
+            project_name: "My Project".to_string(),
+            version: "0.1.0".to_string(),
+            environments: std::collections::HashMap::new(),
+            salt: None,
+        };
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(&path, serde_json::to_string_pretty(&default_config).unwrap_or_default());
+    }
 
-    Ok(LockedFile { _lock, path })
+    // Retry logic for acquiring lock - helps with concurrent access
+    let max_retries = 5;
+    let mut last_error = None;
+    
+    for attempt in 0..max_retries {
+        match locking::FileLock::acquire_exclusive(&path) {
+            Ok(_lock) => {
+                return Ok(LockedFile { _lock, path });
+            }
+            Err(e) => {
+                last_error = Some(e);
+                // Wait a bit before retrying (exponential backoff)
+                if attempt < max_retries - 1 {
+                    std::thread::sleep(std::time::Duration::from_millis(10 * (1 << attempt)));
+                }
+            }
+        }
+    }
+    
+    Err(PersistenceError::IoError {
+        source: std::io::Error::other(format!(
+            "Could not acquire file lock after {} attempts: {:?}", 
+            max_retries, last_error
+        )),
+    })
 }
 
 pub fn atomic_update_config<F>(update_fn: F) -> Result<(), PersistenceError>
@@ -570,29 +590,9 @@ pub fn export_to_yaml(
 }
 
 // Helper function to get encryption key using Argon2 with salt
+// Note: Key derivation is intentionally slow (Argon2). Rate limiting is NOT applied here
+// because the computation itself provides adequate protection against brute-force.
 fn get_encryption_key() -> Result<[u8; 32], PersistenceError> {
-    // Rate limit encryption key access to prevent brute-force attacks
-    let rate_limiter = get_rate_limiter();
-    let identifier = format!(
-        "{}_{}",
-        std::process::id(),
-        std::env::var("USER").unwrap_or_else(|_| "unknown".to_string())
-    );
-
-    if let Err(e) = rate_limiter.check_rate_limit(&identifier) {
-        let error_msg = match e {
-            RateLimitError::LockedOut(_) => {
-                format!("Rate limit exceeded: {}. Too many decryption attempts.", e)
-            }
-        };
-        return Err(PersistenceError::IoError {
-            source: std::io::Error::other(error_msg),
-        });
-    }
-
-    // Periodically cleanup expired entries to prevent memory growth
-    rate_limiter.cleanup_expired();
-
     let key_str =
         env::var("NARU_ENCRYPTION_KEY").map_err(|_| PersistenceError::MissingEncryptionKey)?;
 

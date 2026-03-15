@@ -216,12 +216,14 @@ pub fn validate_config_key(key: &str) -> Result<(), &'static str> {
 
 /// Sanitize and normalize a configuration key for storage
 /// Returns the NFC-normalized form for consistent comparison
+#[allow(dead_code)]
 pub fn normalize_config_key(key: &str) -> String {
     normalize_unicode(key)
 }
 
 /// Sanitize and normalize an environment name for storage
 /// Returns the NFC-normalized form for consistent comparison
+#[allow(dead_code)]
 pub fn normalize_environment_name(name: &str) -> String {
     normalize_unicode(name)
 }

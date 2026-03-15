@@ -134,12 +134,36 @@ impl AuditLogEntry {
         let lock_dir = log_path_obj.parent().unwrap_or(Path::new("."));
         let lock_path = lock_dir.join("audit.lock");
 
-        let _lock = locking::FileLock::acquire_exclusive(&lock_path).map_err(|e| {
-            Box::new(std::io::Error::other(format!(
-                "Could not acquire audit lock: {}",
-                e
-            ))) as Box<dyn std::error::Error>
-        })?;
+        // Retry logic for audit lock - must hold the lock throughout the operation
+        let max_retries = 5;
+        let mut last_error: Option<std::io::Error> = None;
+        let mut acquired_lock = None;
+        
+        for attempt in 0..max_retries {
+            match locking::FileLock::acquire_exclusive(&lock_path) {
+                Ok(lock) => {
+                    acquired_lock = Some(lock);
+                    break;
+                }
+                Err(e) => {
+                    last_error = Some(e);
+                    if attempt < max_retries - 1 {
+                        std::thread::sleep(std::time::Duration::from_millis(10 * (1 << attempt)));
+                    }
+                }
+            }
+        }
+        
+        if acquired_lock.is_none() {
+            return Err(Box::new(std::io::Error::other(format!(
+                "Could not acquire audit lock after {} attempts: {:?}", 
+                max_retries, last_error
+            ))));
+        }
+
+        // Scope for the lock - must keep it until after write completes
+        {
+            let _lock = acquired_lock.unwrap();
 
         // Get the previous hash from the last line of the file
         let prev_hash = if Path::new(&sanitized_log_path).exists() {
@@ -170,8 +194,8 @@ impl AuditLogEntry {
 
         let log_line = serde_json::to_string(self)?;
         writeln!(file, "{}", log_line)?;
+        } // Lock automatically released when _lock goes out of scope
 
-        // Lock automatically released when _lock goes out of scope
         Ok(())
     }
 

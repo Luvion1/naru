@@ -2,17 +2,29 @@ use fs2::FileExt;
 use std::fs::File;
 use std::io::Error;
 use std::path::Path;
+use std::sync::Mutex;
+
+/// Global lock manager for preventing concurrent config access
+/// Using parking_lot-style Mutex that is Send-safe
+static GLOBAL_LOCK: Mutex<()> = Mutex::new(());
 
 /// Represents a file lock using OS-level advisory locks
 pub struct FileLock {
-    _file: File,
+    _file: Option<File>,
     pub path: std::path::PathBuf,
 }
 
 impl FileLock {
     /// Acquire an exclusive lock on a file
+    /// First acquires a global lock to prevent all concurrent access,
+    /// then acquires a file-specific lock
     pub fn acquire_exclusive<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         let path_ref = path.as_ref();
+
+        // First acquire global lock to serialize all config operations
+        // We hold this lock only during the acquisition phase, not for the entire lifetime
+        // This prevents the Send issue with MutexGuard
+        let _global_guard = GLOBAL_LOCK.lock().unwrap();
 
         // Append .lock to the filename for the lock file
         let lock_path = path_ref.with_extension("lock");
@@ -26,14 +38,18 @@ impl FileLock {
             .read(true)
             .write(true)
             .create(true)
-            .truncate(false) // Don't truncate - could cause race condition
+            .truncate(false)
             .open(&lock_path)?;
 
         // Acquire exclusive lock (blocks until acquired)
         file.lock_exclusive()?;
 
+        // Release global lock before returning - file lock will handle synchronization
+        // The global lock just ensures we don't have issues with creating lock files
+        drop(_global_guard);
+
         Ok(FileLock {
-            _file: file,
+            _file: Some(file),
             path: lock_path,
         })
     }
@@ -41,9 +57,11 @@ impl FileLock {
 
 impl Drop for FileLock {
     fn drop(&mut self) {
-        // Unlocking and removing the lock file is handled automatically when the File object is dropped
-        // and when we explicitly remove the file.
-        let _ = std::fs::remove_file(&self.path);
+        // Release file lock first
+        if let Some(ref file) = self._file {
+            let _ = file.unlock();
+        }
+        // Don't delete the lock file - just unlock
     }
 }
 

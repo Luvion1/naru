@@ -41,6 +41,7 @@ pub struct RateLimiter {
     states: Arc<Mutex<HashMap<String, RateLimitState>>>,
 }
 
+#[allow(dead_code)]
 impl RateLimiter {
     pub fn new(config: RateLimitConfig) -> Self {
         Self {
@@ -115,6 +116,7 @@ impl RateLimiter {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum RateLimitError {
     LockedOut(Duration),
 }
