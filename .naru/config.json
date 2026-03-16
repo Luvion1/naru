@@ -2,17 +2,24 @@
   "project_name": "My Project",
   "version": "0.1.0",
   "environments": {
+    "staging": {
+      "parent": null,
+      "entries": {}
+    },
     "production": {
       "parent": null,
       "entries": {}
     },
     "development": {
       "parent": null,
-      "entries": {}
-    },
-    "staging": {
-      "parent": null,
-      "entries": {}
+      "entries": {
+        "DB_HOST": {
+          "value": "localhost",
+          "type": "string",
+          "is_secret": false,
+          "encrypted": false
+        }
+      }
     }
   },
   "salt": "c94a97b27dd320ae6d4578871d3c640e"

@@ -168,6 +168,12 @@ fn main() -> Result<()> {
         cli::parser::Commands::Search { query, env, values } => {
             commands::search::SearchCommand::new(query, env, values).execute()?;
         }
+        cli::parser::Commands::Doctor => {
+            commands::doctor::DoctorCommand::new().execute()?;
+        }
+        cli::parser::Commands::Stats => {
+            commands::stats::StatsCommand::new().execute()?;
+        }
     }
 
     Ok(())

@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.6] - 2026-03-16
+
+### Added
+- **Doctor Command**: New `naru doctor` command for diagnosing common setup issues
+  - Checks Naru directory existence
+  - Validates configuration file integrity
+  - Verifies schema file validity
+  - Checks encryption key configuration and strength
+  - Inspects audit log status
+  - Analyzes file permissions (Unix systems)
+  - Verifies project integrity and file locks
+  - Provides actionable recommendations for issues found
+
+- **Statistics Command**: New `naru stats` command for project analytics
+  - Project information overview
+  - Environment statistics with entry counts
+  - Value type distribution analysis
+  - Security statistics (secrets vs non-secrets)
+  - Schema field analysis
+  - Audit log metrics
+  - Beautiful formatted output with color-coded sections
+
+### Tests
+- Added comprehensive unit tests for Doctor command (4 tests)
+- Added comprehensive unit tests for Stats command (3 tests)
+- All tests passing with 100% success rate
+
 ## [0.6.5] - 2026-03-16
 ### Added
 - **FileStorage Module**: New `FileStorage` struct in `src/core/storage.rs` with full CRUD operations:

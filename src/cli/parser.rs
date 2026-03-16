@@ -127,6 +127,10 @@ pub enum Commands {
         #[arg(short, long)]
         values: bool,
     },
+    /// Diagnose common setup issues
+    Doctor,
+    /// Show project statistics and analytics
+    Stats,
     /// Show version information
     Version,
 }
