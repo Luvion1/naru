@@ -9,7 +9,7 @@
 [![Rust 2021](https://img.shields.io/badge/Rust-2021-orange?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
 [![AES-256-GCM](https://img.shields.io/badge/Security-AES--256--GCM-green?style=for-the-badge)](docs/security-model.md)
 [![Audit Chained](https://img.shields.io/badge/Audit-Hash--Chained-blue?style=for-the-badge)](docs/audit-system.md)
-[![Tests](https://img.shields.io/badge/Tests-257%20passed-brightgreen?style=for-the-badge)]()
+[![Tests](https://img.shields.io/badge/Tests-264%20passed-brightgreen?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 
 **Naru** (naru-config) is an industrial-grade, security-first configuration engine. Built with Rust 2021 edition, it provides a tamper-evident, schema-enforced ecosystem for managing application secrets and environment variables in high-stakes production environments.
@@ -27,7 +27,7 @@
 | **Industrial Validation** | Enforce strict types, numeric ranges, and **Regex patterns** before data ever leaves the CLI. |
 | **Atomic & Thread-Safe** | OS-level advisory locking ensures zero data corruption during concurrent operations. |
 | **Modern Interop** | Native handling of `.env`, `YAML`, `JSON`, and `TOML` with intelligent merging logic. |
-| **Battle-Tested** | 257+ automated tests including penetration testing and security analysis. |
+| **Battle-Tested** | 264+ automated tests including penetration testing and security analysis. |
 
 ---
 
