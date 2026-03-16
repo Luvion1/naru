@@ -38,7 +38,10 @@ impl ExportCommand {
                     );
                 }
                 _ => {
-                    eprintln!("Unsupported format: {}. Use 'env' or 'yaml'.", self.format);
+                    return Err(anyhow::anyhow!(
+                        "Unsupported format: {}. Use 'env' or 'yaml'.",
+                        self.format
+                    ));
                 }
             }
             Ok(())

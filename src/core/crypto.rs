@@ -19,23 +19,6 @@ pub fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32], Box<dyn std::
     Ok(result)
 }
 
-#[allow(dead_code)]
-pub fn derive_key_secure(
-    password: &str,
-    salt: &[u8],
-) -> Result<[u8; 32], Box<dyn std::error::Error>> {
-    let mut key = [0u8; 32];
-    let argon2 = Argon2::default();
-    argon2
-        .hash_password_into(password.as_bytes(), salt, &mut key)
-        .map_err(|e| {
-            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
-        })?;
-    let result = key;
-    key.zeroize();
-    Ok(result)
-}
-
 pub fn is_key_too_weak(key: &[u8; 32]) -> bool {
     use std::collections::HashSet;
 

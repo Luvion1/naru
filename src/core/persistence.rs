@@ -732,6 +732,25 @@ mod tests {
         }
     }
 
+    struct EnvVarGuard {
+        key: String,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &str, value: &str) -> Self {
+            std::env::set_var(key, value);
+            Self {
+                key: key.to_string(),
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            std::env::remove_var(&self.key);
+        }
+    }
+
     #[test]
     #[serial]
     fn test_save_and_load_json() {
@@ -876,19 +895,17 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let _guard = TestDirGuard::new(temp_dir.path());
 
-        // Initialize project to create salt
         init_project().unwrap();
 
-        unsafe { std::env::set_var("NARU_ENCRYPTION_KEY", "test_key_for_encryption") };
+        let _env_guard1 = EnvVarGuard::set("NARU_ENCRYPTION_KEY", "test_key_for_encryption");
         let key1 = get_encryption_key().unwrap();
 
-        unsafe { std::env::set_var("NARU_ENCRYPTION_KEY", "different_key_string") };
+        let _env_guard2 = EnvVarGuard::set("NARU_ENCRYPTION_KEY", "different_key_string");
         let key2 = get_encryption_key().unwrap();
 
         assert_ne!(key1, key2);
         assert_eq!(key1.len(), 32);
         assert_eq!(key2.len(), 32);
-        unsafe { std::env::remove_var("NARU_ENCRYPTION_KEY") };
     }
 
     #[test]
@@ -1139,7 +1156,7 @@ mod tests {
     fn test_encrypt_if_needed_on_already_encrypted_value() {
         let temp_dir = TempDir::new().unwrap();
         let _guard = TestDirGuard::new(temp_dir.path());
-        unsafe { std::env::set_var("NARU_ENCRYPTION_KEY", "test_key_for_edge_cases") };
+        let _env_guard = EnvVarGuard::set("NARU_ENCRYPTION_KEY", "test_key_for_edge_cases");
         init_project().unwrap();
 
         atomic_update_config(|config| {
@@ -1193,7 +1210,6 @@ mod tests {
         let decrypted_first = crypto::decrypt_data(&first_encrypted, &encryption_key).unwrap();
         let decrypted_second = crypto::decrypt_data(&second_encrypted, &encryption_key).unwrap();
         assert_eq!(decrypted_first, decrypted_second);
-        unsafe { std::env::remove_var("NARU_ENCRYPTION_KEY") };
     }
 
     #[test]
