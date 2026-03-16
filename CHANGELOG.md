@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.5] - 2026-03-16
+### Added
+- **FileStorage Module**: New `FileStorage` struct in `src/core/storage.rs` with full CRUD operations:
+  - `new()`, `ensure_dir()`, `exists()`, `read()`, `write()`, `delete()`
+  - `list_files()`, `copy()`, `move_file()`, `get_size()`
+  - Includes comprehensive unit tests (6 tests)
+- **EnvVarGuard**: Safe pattern for managing environment variables in tests (replaces `unsafe { env::set_var }`)
+
+### Bug Fixes
+- **Export Error Handling**: Fixed missing error return for unsupported export formats in `src/commands/export.rs`
+- **Persistence Tests**: Replaced 3 instances of unsafe env var manipulation with safe `EnvVarGuard` pattern
+
+### Improvements
+- Removed duplicate `derive_key_secure` function in `src/core/crypto.rs`
+- Updated dependencies in Cargo.toml
+
+## [0.6.4] - 2026-03-16
+### Fixed
+- Duplicate code in crypto.rs - removed redundant `derive_key_secure` function
+
 ## [0.6.3] - 2026-03-15
 ### Added
 - **Search Command**: New `naru search <query>` command to find configuration keys and values across environments

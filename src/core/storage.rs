@@ -1,10 +1,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[allow(dead_code)]
 pub struct FileStorage {
     base_path: PathBuf,
 }
 
+#[allow(dead_code)]
 impl FileStorage {
     pub fn new(base_path: impl Into<PathBuf>) -> Self {
         Self {

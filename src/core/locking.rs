@@ -14,7 +14,9 @@ pub struct FileLock {
     path: std::path::PathBuf,
 }
 
+#[allow(dead_code)]
 impl FileLock {
+    #[allow(dead_code)]
     pub fn path(&self) -> &std::path::PathBuf {
         &self.path
     }
@@ -82,7 +84,7 @@ mod tests {
 
         // First lock
         let lock1 = FileLock::acquire_exclusive(&target_file).expect("Should acquire first lock");
-        assert!(lock1.path.exists());
+        assert!(lock1.path().exists());
 
         // Second lock attempt in another scope or handled correctly
         // (fs2 lock_exclusive is blocking, so this would block indefinitely in a single thread)
