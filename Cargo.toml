@@ -1,36 +1,82 @@
 [package]
 name = "naru-config"
-version = "0.6.6"
+version = "0.7.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/Luvion1/naru"
 description = "A security-first configuration manager with encryption and audit logging"
 documentation = "https://github.com/Luvion1/naru/tree/master/docs"
-keywords = ["config", "encryption", "security", "aes", "cli"]
+keywords = ["config", "encryption", "security", "aes", "cli", "secrets", "vault"]
 categories = ["command-line-utilities", "cryptography"]
+rust-version = "1.70"
+
+[package.metadata]
+cargo-gha = { repository = "https://github.com/Luvion1/naru" }
+
+[[bin]]
+name = "naru"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+cli = ["clap", "dialoguer", "console"]
 
 [dependencies]
+# Core
 anyhow = "1.0.102"
-clap = { version = "4.6.0", features = ["derive"] }
+thiserror = "1.0.69"
+
+# Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-thiserror = "1.0.69"
-dotenvy = "0.15.7"
 serde_yaml = "0.9"
+toml = "0.8"
+
+# Cryptography
 aes-gcm = "0.10.3"
+argon2 = "0.5"
+sha2 = "0.10"
 hex = "0.4.3"
 rand = "0.8.5"
-toml = "0.8"
+zeroize = "1.8"
+
+# Utilities
 chrono = { version = "0.4.43", features = ["serde"] }
 regex = "1.12"
-dialoguer = "0.12.0"
-console = "0.16"
-fs2 = "0.4.3"
-sha2 = "0.10"
-argon2 = "0.5"
+dotenvy = "0.15.7"
 unicode-normalization = "0.1.25"
-zeroize = "1.8"
+
+# File operations
+fs2 = "0.4.3"
+
+# CLI (optional)
+clap = { version = "4.6.0", features = ["derive"], optional = true }
+dialoguer = { version = "0.12.0", optional = true }
+console = { version = "0.16", optional = true }
 
 [dev-dependencies]
 serial_test = "3.3.1"
 tempfile = "3.14"
+
+[lib]
+name = "naru_core"
+path = "src/lib.rs"
+
+[[test]]
+name = "naru_tests"
+path = "tests/integration.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[badges]
+github = { repository = "Luvion1/naru", workflow = "ci" }
+crates-io = { version = "1.0" }

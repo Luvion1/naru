@@ -52,7 +52,7 @@ pub fn execute_create(cmd: BackupCreateCommand) -> Result<()> {
     })
     .map_err(|e| anyhow!("Failed to load config: {}. Run 'naru init' first.", e))?;
 
-    let backup_data = BackupData { config, schema };
+    let backup_data = BackupData::new(config, schema);
 
     let json_data = serde_json::to_string_pretty(&backup_data)?;
     std::fs::write(
